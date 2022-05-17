@@ -1,7 +1,26 @@
 import os
-import paramiko
-import requests
 import threading
+import time
+
+try:
+    import threading
+except ImportError:
+    os.system("pip3 install threading")
+    import threading
+
+try:
+    import paramiko
+except ImportError:
+    os.system("pip3 install paramiko")
+    import paramiko
+
+try:
+    import requests
+except ImportError:
+    os.system("pip3 install requests")
+    import requests
+
+
 
 
 def sn_get_left_satellite(current_sat_id, current_orbit_id, orbit_num):
@@ -35,7 +54,8 @@ def sn_get_down_satellite(current_sat_id, current_orbit_id, sat_num):
 def sn_rename_all_container(remote_ssh, container_id_list, container_global_idx):
     print("Rename all containers ...")
     for container_id in container_id_list:
-        print(sn_remote_cmd(remote_ssh, "docker rename " + str(container_id) + " ovs_container_" + str(container_global_idx)))
+        print("Rename " + str(container_id) + " to ovs_container_" + str(container_global_idx))
+        sn_remote_cmd(remote_ssh, "docker rename " + str(container_id) + " ovs_container_" + str(container_global_idx))
         container_global_idx = container_global_idx + 1
 
 
@@ -49,10 +69,14 @@ def sn_delete_remote_network_bridge(remote_machine_ssh):
 
 def sn_reset_docker_env(remote_machine_ssh, docker_service_name, constellation_size):
     print("Reset docker environment for constellation emulation ...")
+    print("Remove legacy containers.")
     print(sn_remote_cmd(remote_machine_ssh, "docker service rm " + docker_service_name))
     print(sn_remote_cmd(remote_machine_ssh, "docker rm -f $(docker ps -a -q)"))
-    print(sn_remote_cmd(remote_machine_ssh, "docker service create --replicas " + str(constellation_size) + " --name " + str(docker_service_name) + " --cap-add ALL lzq8272587/starlab_node ping www.baidu.com"))
+    print("Remove legacy emulated ISLs.")
     sn_delete_remote_network_bridge(remote_machine_ssh)
+    print("Create new containers.")
+    print(sn_remote_cmd(remote_machine_ssh, "docker service create --replicas " + str(constellation_size) + " --name " + str(docker_service_name) + " --cap-add ALL lzq8272587/starlab_node ping www.baidu.com"))
+
 
 
 
@@ -91,7 +115,7 @@ def sn_establish_intra_ISL_native(remote_machine_ssh, container_id_list, orbit_n
         for current_sat_id in range(0, sat_num):
             # (Down):
             [down_sat_id, down_orbit_id] = sn_get_down_satellite(current_sat_id, current_orbit_id, sat_num)
-            print("[" + str(isl_idx) + "/" + str(constellation_size * 4) + "] Establish intra-orbit ISL from: (" + str(current_sat_id) + "," + str(current_orbit_id) + ") to (" + str(down_sat_id) + "," + str(down_orbit_id) + ")")
+            print("[" + str(isl_idx) + "/" + str(constellation_size * 2) + "] Establish intra-orbit ISL from: (" + str(current_sat_id) + "," + str(current_orbit_id) + ") to (" + str(down_sat_id) + "," + str(down_orbit_id) + ")")
             #print("ovs-vsctl add-br ISL_" + str(current_sat_id) + "-" + str(current_orbit_id) + "_" + str(down_sat_id) + "-" + str(down_orbit_id) )
             ISL_name = "La_" + str(current_sat_id) + "-" + str(current_orbit_id) + "_" + str(down_sat_id) + "-" + str(down_orbit_id)
             address_16_23 = isl_idx >> 8
@@ -127,12 +151,13 @@ def sn_establish_inter_ISL_native(remote_machine_ssh, container_id_list, orbit_n
             address_16_23 = isl_idx >> 8
             address_8_15 = isl_idx & 0xff
             # Create internal network in docker.
-            sn_remote_cmd(remote_machine_ssh, 'docker network create ' + ISL_name + " --subnet 10." + str(address_16_23) + "." + str(address_8_15) + ".0/24")
             print('[Create ISL:]' + 'docker network create ' + ISL_name + " --subnet 10." + str(address_16_23) + "." + str(address_8_15) + ".0/24")
-            sn_remote_cmd(remote_machine_ssh, 'docker network connect ' + ISL_name + " " + str(container_id_list[current_orbit_id * sat_num + current_sat_id]) + " --ip 10." + str(address_16_23) + "." + str(address_8_15) + ".30")
+            sn_remote_cmd(remote_machine_ssh, 'docker network create ' + ISL_name + " --subnet 10." + str(address_16_23) + "." + str(address_8_15) + ".0/24")
             print('[Add current node:]' + 'docker network connect ' + ISL_name + " " + str(container_id_list[current_orbit_id * sat_num + current_sat_id]) + " --ip 10." + str(address_16_23) + "." + str(address_8_15) + ".30")
-            sn_remote_cmd(remote_machine_ssh, 'docker network connect ' + ISL_name + " " + str(container_id_list[right_orbit_id * sat_num + right_sat_id]) + " --ip 10." + str(address_16_23) + "." + str(address_8_15) + ".20")
+            sn_remote_cmd(remote_machine_ssh, 'docker network connect ' + ISL_name + " " + str(container_id_list[current_orbit_id * sat_num + current_sat_id]) + " --ip 10." + str(address_16_23) + "." + str(address_8_15) + ".30")
             print('[Add right node:]' + 'docker network connect ' + ISL_name + " " + str(container_id_list[right_orbit_id * sat_num + right_sat_id]) + " --ip 10." + str(address_16_23) + "." + str(address_8_15) + ".20")
+            sn_remote_cmd(remote_machine_ssh, 'docker network connect ' + ISL_name + " " + str(container_id_list[right_orbit_id * sat_num + right_sat_id]) + " --ip 10." + str(address_16_23) + "." + str(address_8_15) + ".20")
+
 
             #os.system("ovs-docker add-port " + str(ISL_hub) + " ISL_right " + str(container_id_list[current_orbit_id * sat_num + current_sat_id]) + " --ipaddress=10." + str(address_16_23) + "." + str(address_8_15) + ".3/24" )
             #os.system("ovs-docker add-port " + str(ISL_hub) + " ISL_left " + str(container_id_list[right_orbit_id * sat_num + right_sat_id]) + " --ipaddress=10." + str(address_16_23) + "." + str(address_8_15) + ".2/24")
@@ -152,12 +177,12 @@ def sn_establish_ISLs(remote_machine_ssh, container_id_list, orbit_num, sat_num,
     sn_establish_intra_ISL_native(remote_machine_ssh, container_id_list, orbit_num, sat_num, constellation_size, internal_isl_idx)
 
 
-def sn_copy_conf_to_each_container(remote_machine_ssh, container_id_list):
+def sn_copy_conf_to_each_container(remote_machine_ssh, container_id_list, conf_path):
     print("Copy bird configuration file to each container and run routing process.")
     total = len(container_id_list)
     current = 1
     for container_idx in container_id_list:
-        sn_remote_cmd(remote_machine_ssh, "docker cp /home/ubuntu/Work/Docker/multi_host_remote_control/bird.conf " + str(container_idx) + ":/bird.conf")
+        sn_remote_cmd(remote_machine_ssh, "docker cp " + conf_path + " " + str(container_idx) + ":/bird.conf")
         print("[" + str(current) + "/" + str(total) + "]" + " docker cp bird.conf " + str(container_idx) + ":/bird.conf")
         current = current + 1
 
@@ -169,8 +194,12 @@ def sn_run_bird_by_container_name(remote_machine_ssh, container_id_list):
     for container_id in container_id_list:
         output_len = 0
         while output_len < 1:
+            print("docker exec -it " + str(container_id) + " bird -c /bird.conf")
             run_account = sn_remote_cmd(remote_machine_ssh, "docker exec -it " + str(container_id) + " bird -c bird.conf")
+            for line in run_account:
+                print(line)
             output_len = len(run_account)
+            time.sleep(1)
         print("[" + str(idx) +"/" + str(total) +"] Bird routing process for container: " + str(container_id) + " has started. ")
         idx = idx + 1
 

@@ -53,3 +53,4 @@ dkms.conf
 
 .DS_Store
 .idea
+__pycache__
