@@ -264,7 +264,7 @@ def sn_reset_docker_env(remote_ssh, docker_service_name, node_size):
     sn_remote_cmd(
         remote_ssh, "docker service create --replicas " + str(node_size) +
         " --name " + str(docker_service_name) +
-        " --cap-add ALL lzq8272587/starlab_node ping www.baidu.com")
+        " --cap-add ALL lwsen/starlab_node:1.0 ping www.baidu.com")
 
 
 def sn_rename_all_container(remote_ssh, container_id_list, new_idx):
@@ -359,7 +359,7 @@ class sn_Emulation_Start_Thread(threading.Thread):
                  ping_src, ping_des, ping_time, sr_src, sr_des, sr_target,
                  sr_time, damage_ratio, damage_time, damage_list,
                  recovery_time, route_src, route_time, duration,
-                 utility_checking_time):
+                 utility_checking_time, perf_src, perf_des, perf_time):
         threading.Thread.__init__(self)
         self.remote_ssh = remote_ssh
         self.remote_ftp = remote_ftp
@@ -374,6 +374,9 @@ class sn_Emulation_Start_Thread(threading.Thread):
         self.ping_src = ping_src
         self.ping_des = ping_des
         self.ping_time = ping_time
+        self.perf_src = perf_src
+        self.perf_des = perf_des
+        self.perf_time = perf_time
         self.sr_src = sr_src
         self.sr_des = sr_des
         self.sr_target = sr_target
@@ -391,6 +394,7 @@ class sn_Emulation_Start_Thread(threading.Thread):
 
     def run(self):
         ping_threads = []
+        perf_threads = []
         timeptr = 2  # current emulating time
         topo_change_file_path = self.configuration_file_path + "/" + self.file_path + '/Topo_leo_change.txt'
         fi = open(topo_change_file_path, 'r')
@@ -454,6 +458,25 @@ class sn_Emulation_Start_Thread(threading.Thread):
                                           self.remote_ssh))
                                 ping_thread.start()
                                 ping_threads.append(ping_thread)
+                    if timeptr in self.perf_time:
+                        if timeptr in self.perf_time:
+                            index = [
+                                i for i, val in enumerate(self.perf_time)
+                                if val == timeptr
+                            ]
+                            for index_num in index:
+                                perf_thread = threading.Thread(
+                                    target=sn_perf,
+                                    args=(self.perf_src[index_num],
+                                          self.perf_des[index_num],
+                                          self.perf_time[index_num],
+                                          self.constellation_size,
+                                          self.container_id_list,
+                                          self.file_path,
+                                          self.configuration_file_path,
+                                          self.remote_ssh))
+                                perf_thread.start()
+                                perf_threads.append(perf_thread)
                     if timeptr in self.route_time:
                         index = [
                             i for i, val in enumerate(self.route_time)
@@ -564,6 +587,24 @@ class sn_Emulation_Start_Thread(threading.Thread):
                                       self.remote_ssh))
                             ping_thread.start()
                             ping_threads.append(ping_thread)
+                if timeptr in self.perf_time:
+                    if timeptr in self.perf_time:
+                        index = [
+                            i for i, val in enumerate(self.perf_time)
+                            if val == timeptr
+                        ]
+                        for index_num in index:
+                            perf_thread = threading.Thread(
+                                target=sn_perf,
+                                args=(self.perf_src[index_num],
+                                      self.perf_des[index_num],
+                                      self.perf_time[index_num],
+                                      self.constellation_size,
+                                      self.container_id_list, self.file_path,
+                                      self.configuration_file_path,
+                                      self.remote_ssh))
+                            perf_thread.start()
+                            perf_threads.append(perf_thread)
                 if timeptr in self.route_time:
                     index = [
                         i for i, val in enumerate(self.route_time)
@@ -580,6 +621,8 @@ class sn_Emulation_Start_Thread(threading.Thread):
         fi.close()
         for ping_thread in ping_threads:
             ping_thread.join()
+        for perf_thread in perf_threads:
+            perf_thread.join()
 
 
 def sn_check_utility(time_index, remote_ssh, file_path):
@@ -599,8 +642,8 @@ def sn_update_delay(file_path, configuration_file_path, timeptr,
         '.txt', file_path + '/' + str(timeptr) + '.txt')
     sn_remote_cmd(
         remote_ssh,
-        "python3 " + file_path + "/sn_orchestrater.py " + file_path +
-        '/' + str(timeptr) + '.txt ' + str(constellation_size) + " update")
+        "python3 " + file_path + "/sn_orchestrater.py " + file_path + '/' +
+        str(timeptr) + '.txt ' + str(constellation_size) + " update")
     print("Delay updating done.\n")
 
 
@@ -621,9 +664,8 @@ def sn_damage(ratio, damage_list, constellation_size, remote_ssh, remote_ftp,
     remote_ftp.put(
         configuration_file_path + "/" + file_path +
         '/mid_files/damage_list.txt', file_path + "/damage_list.txt")
-    sn_remote_cmd(
-        remote_ssh,
-        "python3 " + file_path + "/sn_orchestrater.py " + file_path)
+    sn_remote_cmd(remote_ssh,
+                  "python3 " + file_path + "/sn_orchestrater.py " + file_path)
     print("Damage done.\n")
 
 
@@ -692,6 +734,37 @@ def sn_ping(src, des, time_index, constellation_size, container_id_list,
         configuration_file_path + "/" + file_path + "/ping-" + str(src) + "-" +
         str(des) + "_" + str(time_index) + ".txt", "w")
     f.writelines(ping_result)
+    f.close()
+
+
+def sn_perf(src, des, time_index, constellation_size, container_id_list,
+            file_path, configuration_file_path, remote_ssh):
+    if des <= constellation_size:
+        ifconfig_output = sn_remote_cmd(
+            remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
+            " ifconfig | sed 's/[ \t].*//;/^\(eth0\|\)\(lo\|\)$/d'")
+        des_IP = sn_remote_cmd(
+            remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
+            " ifconfig " + ifconfig_output[0][:-1] +
+            "|awk -F '[ :]+' 'NR==2{print $4}'")
+    else:
+        des_IP = sn_remote_cmd(
+            remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
+            " ifconfig B" + str(des) +
+            "-default |awk -F '[ :]+' 'NR==2{print $4}'")
+
+    sn_remote_cmd(
+        remote_ssh,
+        "docker exec -id " + str(container_id_list[des - 1]) + " iperf3 -s ")
+    print("iperf server success")
+    perf_result = sn_remote_cmd(
+        remote_ssh, "docker exec -i " + str(container_id_list[src - 1]) +
+        " iperf3 -c " + str(des_IP[0][:-1]) + " -t 5 ")
+    print("iperf client success")
+    f = open(
+        configuration_file_path + "/" + file_path + "/perf-" + str(src) + "-" +
+        str(des) + "_" + str(time_index) + ".txt", "w")
+    f.writelines(perf_result)
     f.close()
 
 

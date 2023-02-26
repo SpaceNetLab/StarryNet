@@ -16,6 +16,10 @@ starrynet> set_ping 26 27 30
 
 should work correctly and allow node#26 to ping node#26 at 30 second.
 
+starrynet> set_perf 26 27 30
+
+should work correctly and allow node#26 to perf node#26 at 30 second.
+
 author: Yangtao Deng (dengyt21@mails.tsinghua.edu.cn)
 """
 
@@ -104,6 +108,8 @@ class CLI(Cmd):
         '   // It means setting the next hop to node #2 for node #1 for the destination of node #26 at #45 second. Sat, Des and NextHopSat are indexes and Sat and NextHopSat are neighbors, which will be processed during emulation.\n'
         '  starrynet> set_ping 1 26 46\n'
         '   // It means pinging msg of from node #1 to node #26 at #46 second. The output file will be written at the working directory.\n'
+        '  starrynet> set_perf 1 26 46\n'
+        '   // It means perfing from node #1 to node #26 at #46 second. The perfing output file will be written at the working directory.\n'
         '  starrynet> start_emulation\n'
         '   // "create_nodes", "create_links" and "run_routing_deamon" must be runned before this.'
         '  starrynet> stop_emulation\n'
@@ -209,6 +215,13 @@ class CLI(Cmd):
         arg, args, line = self.parseline(line)
         rest = line.split(' ')
         self.sn.set_ping(int(rest[0]), int(rest[1]), int(rest[2]))
+
+    def do_set_perf(self, line):
+        "perf msg of two nodes at a certain time"
+        "The output file will be written at the working directory"
+        arg, args, line = self.parseline(line)
+        rest = line.split(' ')
+        self.sn.set_perf(int(rest[0]), int(rest[1]), int(rest[2]))
 
     def do_start_emulation(self, _line):
         "start the emulation"

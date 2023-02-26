@@ -29,20 +29,26 @@ if __name__ == "__main__":
     node_index1 = 1
     node_index2 = 2
     time_index = 2
+
     # distance between nodes at a certain time
     node_distance = sn.get_distance(node_index1, node_index2, time_index)
     print("node_distance (km): " + str(node_distance))
+
     # neighbor node indexes of node at a certain time
     neighbors_index = sn.get_neighbors(node_index1, time_index)
     print("neighbors_index: " + str(neighbors_index))
+
     # GS connected to the node at a certain time
     node_index1 = 7
     GSes = sn.get_GSes(node_index1, time_index)
     print("GSes are: " + str(GSes))
+
     # LLA of a node at a certain time
     LLA = sn.get_position(node_index1, time_index)
     print("LLA: " + str(LLA))
+
     sn.get_utility(time_index)  # CPU and memory useage
+
     # IPList of a node
     IP_list = sn.get_IP(node_index1)
     print("IP: " + str(IP_list))
@@ -51,6 +57,7 @@ if __name__ == "__main__":
     time_index = 5
     # random damage of a given ratio at a certain time
     sn.set_damage(ratio, time_index)
+
     time_index = 10
     sn.set_recovery(time_index)  # recover the damages at a certain time
 
@@ -58,12 +65,14 @@ if __name__ == "__main__":
     time_index = 15
     # routing table of a node at a certain time. The output file will be written at the working directory.
     sn.check_routing_table(node_index1, time_index)
+
     sat = 1
     des = 27
     next_hop_sat = 2
     time_index = 20
     # set the next hop at a certain time. Sat, Des and NextHopSat are indexes and Sat and NextHopSat are neighbors.
     sn.set_next_hop(sat, des, next_hop_sat, time_index)
+
     node_index1 = 13
     node_index2 = 14
     time_index = 3
@@ -75,5 +84,12 @@ if __name__ == "__main__":
         time_index = i
         # ping msg of two nodes at a certain time. The output file will be written at the working directory.
         sn.set_ping(node_index1, node_index2, time_index)
+
+    node_index1 = 13
+    node_index2 = 14
+    time_index = 4
+    # perf msg of two nodes at a certain time. The output file will be written at the working directory.
+    sn.set_perf(node_index1, node_index2, time_index)
+
     sn.start_emulation()
     sn.stop_emulation()

@@ -82,6 +82,9 @@ class StarryNet():
         self.ping_src = []
         self.ping_des = []
         self.ping_time = []
+        self.perf_src = []
+        self.perf_des = []
+        self.perf_time = []
         self.sr_src = []
         self.sr_des = []
         self.sr_target = []
@@ -208,6 +211,11 @@ class StarryNet():
         self.ping_des.append(sat2_index)
         self.ping_time.append(time_index)
 
+    def set_perf(self, sat1_index, sat2_index, time_index):
+        self.perf_src.append(sat1_index)
+        self.perf_des.append(sat2_index)
+        self.perf_time.append(time_index)
+
     def start_emulation(self):
         # Start emulation in a new thread.
         sn_thread = sn_Emulation_Start_Thread(
@@ -219,7 +227,8 @@ class StarryNet():
             self.ping_time, self.sr_src, self.sr_des, self.sr_target,
             self.sr_time, self.damage_ratio, self.damage_time,
             self.damage_list, self.recovery_time, self.route_src,
-            self.route_time, self.duration, self.utility_checking_time)
+            self.route_time, self.duration, self.utility_checking_time,
+            self.perf_src, self.perf_des, self.perf_time)
         sn_thread.start()
         sn_thread.join()
 

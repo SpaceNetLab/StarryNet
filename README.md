@@ -108,6 +108,10 @@ This API sets the next hop at a certain time. Sat, Des and NextHopSat are indexe
 
 This API will starts pinging msg of two nodes at a certain time. The output file could be found at the working directory.
 
+> sn.set_perf(node_index1, node_index2, time_index)
+
+This API will starts perfing msg of two nodes at a certain time. The output file could be found at the working directory.
+
 > sn.start_emulation()
 
 This API starts the entire emulation of the duration.
@@ -190,7 +194,11 @@ In the same path of `config.json`, run `sn` in shell, you will see the starrynet
 
 > starrynet> set_ping 1 26 46
 
-*It means pinging msg of from node #1 to node #26 at #46 second. The output file will be written at the working directory.*
+*It means pinging from node #1 to node #26 at #46 second. The output file will be written at the working directory.*
+
+> starrynet> set_perf 1 26 46
+
+*It means perfing from node #1 to node #26 at #46 second. The perfing output file will be written at the working directory.*
 
 > starrynet> start_emulation
 
