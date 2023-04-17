@@ -2,9 +2,9 @@
 
 StarryNet for the emulation of satellite Internet constellations.
 
-## What is StarLab?
+## What is StarryNet?
 
-Starlab helps you to emulate your customized constellation and ground stations with run-time routing for a given duration. With Starlab, you can test availability/bandwidth/loss within nodes, check routing states of a node and even damage certain links.
+StarryNet helps you to emulate your customized constellation and ground stations with run-time routing for a given duration. With StarryNet, you can test availability/bandwidth/loss within nodes, check routing states of a node and even damage certain links.
 
 ## What are the components?
 
