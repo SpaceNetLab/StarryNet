@@ -10,7 +10,7 @@ from starrynet.sn_orchestrater import *
 from starrynet.sn_synchronizer import *
 
 if __name__ == "__main__":
-    # Starlink 5*5: 725 satellite nodes, 2 ground stations.
+    # Starlink 5*5: 25 satellite nodes, 2 ground stations.
     # The node index sequence is: 25 sattelites, 2 ground stations.
     # In this example, 25 satellites and 2 ground stations are one AS.
 
