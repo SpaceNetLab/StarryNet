@@ -11,7 +11,9 @@ def cleanup():
     print("Deleting all native bridges and containers...")
     #os.system("FOR /f \"tokens=*\" %i IN ('docker ps -q') DO docker stop %i")
     os.system("docker service rm constellation-test")
-    with os.popen("docker rm -f $(docker ps -a -q)") as f:
+    with os.popen(
+            "docker rm -f $(docker ps | grep \"lwsen/starlab_node:1.0\" | awk '{ print $1 }')"
+    ) as f:
         f.readlines()
     with os.popen("docker network ls") as f:
         all_br_info = f.readlines()
