@@ -11,8 +11,7 @@ StarryNet helps you to emulate your customized constellation and ground stations
 1. A configuration file (`config.json`).
 2. An API Library (`starrynet`).
 3. An example leveraging APIs to run your trials (`example.py`).
-4. A routing configuration file (`bird.conf`).
-5. A `setup.py` and `./bin/sn`.
+4. A `setup.py` and `./bin/sn`.
 
 ## Preparation
 
@@ -31,7 +30,7 @@ Then run `bash ./install.sh` to install CLI sn, which will also install packets 
 
 Finish *remote_machine_IP, remote_machine_username and remote_machine_password* in config.json to specify the remote machine for running the emulation. 
 
-Put `config.json`, `starrynet`, `bird.conf` and `example.py` at the same working directory.
+Put `config.json`, `starrynet`, and `example.py` at the same working directory.
 
 3. Start emulation:
 
