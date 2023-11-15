@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 "Setuptools params"
 
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages, Extension
 from os.path import join
 
 # Get version number from source tree
@@ -10,6 +10,7 @@ import sys
 sys.path.append('.')
 
 scripts = [join('bin', filename) for filename in ['sn']]
+ext_modules = [Extension('pyctr', [join('starrynet', 'pyctr.c')])]
 
 modname = distname = 'starrynet'
 
@@ -35,4 +36,5 @@ setup(
     license='BSD',
     install_requires=['setuptools'],
     scripts=scripts,
+    ext_modules=ext_modules,
 )
