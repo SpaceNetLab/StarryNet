@@ -117,11 +117,14 @@ class Observer():
         radius = 6371
         for num in range(0, length):
             cbf_in = []
-            z = radius * math.sin(math.radians(float(lat_long[num][0])))
-            x = radius * math.cos(math.radians(float(
+            R = radius
+            if len(lat_long[num]) > 2:
+                R += lat_long[num][2]
+            z = R * math.sin(math.radians(float(lat_long[num][0])))
+            x = R * math.cos(math.radians(float(
                 lat_long[num][0]))) * math.cos(
                     math.radians(float(lat_long[num][1])))
-            y = radius * math.cos(math.radians(float(
+            y = R * math.cos(math.radians(float(
                 lat_long[num][0]))) * math.sin(
                     math.radians(float(lat_long[num][1])))
             cbf_in.append(x)
