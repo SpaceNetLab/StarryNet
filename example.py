@@ -6,7 +6,6 @@ author: Zeqi Lai (zeqilai@tsinghua.edu.cn) and Yangtao Deng (dengyt21@mails.tsin
 """
 
 from starrynet.sn_observer import *
-from starrynet.sn_orchestrater import *
 from starrynet.sn_synchronizer import *
 
 if __name__ == "__main__":
@@ -14,17 +13,26 @@ if __name__ == "__main__":
     # The node index sequence is: 25 sattelites, 2 ground stations.
     # In this example, 25 satellites and 2 ground stations are one AS.
 
-    AS = [[1, 27]]  # Node #1 to Node #27 are within the same AS.
     GS_lat_long = [[50.110924, 8.682127], [46.635700, 14.311817]
                    ]  # latitude and longitude of frankfurt and  Austria
     configuration_file_path = "./config.json"
     hello_interval = 1  # hello_interval(s) in OSPF. 1-200 are supported.
 
     print('Start StarryNet.')
-    sn = StarryNet(configuration_file_path, GS_lat_long, hello_interval, AS)
+    sn = StarryNet(configuration_file_path, GS_lat_long)
     sn.create_nodes()
     sn.create_links()
-    sn.run_routing_deamon()
+    # sn.run_routing_deamon()
+    sn.set_ping(1, 1, 1, 1, 1, 2, 0)
+    sn.set_ping(1, 1, 1, 1, 1, 2, 0.5)
+    sn.set_ping(1, 1, 1, 1, 1, 2, 1)
+    sn.set_ping(1, 1, 1, 1, 1, 2, 1.5)
+    sn.set_ping(1, 1, 1, 1, 1, 2, 13.5)
+    sn.set_ping(1, 1, 1, 1, 1, 2, 20)
+    sn.start_emulation()
+    if input('clear environment?[y/n]').strip().lower()[:1] == 'y':
+        sn.clean()
+    exit(0)
 
     node_index1 = 1
     node_index2 = 2

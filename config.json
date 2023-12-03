@@ -38,7 +38,7 @@
         }
     ],
     "Duration (s)": 100,
-    "update_time (s)": 10,
+    "step (s)": 1,
     "satellite link bandwidth (\"X\" Gbps)": 5,
     "sat-ground bandwidth (\"X\" Gbps)": 5,
     "satellite link loss (\"X\"% )": 0,

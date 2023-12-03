@@ -1,12 +1,11 @@
 import os
-import glob
 import json
 import argparse
 import paramiko
 import numpy
 import random
 
-def sn_load_file(path, GS_lat_long):
+def sn_load_file(path):
     f = open(path, 'r', encoding='utf8')
     table = json.load(f)
     parser = argparse.ArgumentParser(description='manual to this script')
@@ -15,9 +14,9 @@ def sn_load_file(path, GS_lat_long):
     parser.add_argument('--IP_version', type=str, default=table['IP version'])
     parser.add_argument('--link_policy', type=str, default=table['Link policy'])
     # link delay updating granularity
-    parser.add_argument('--update_interval',
+    parser.add_argument('--step',
                         type=int,
-                        default=table['update_time (s)'])
+                        default=table['step (s)'])
     parser.add_argument('--duration', type=int, default=table['Duration (s)'])
     parser.add_argument('--sat_bandwidth',
                         type=int,
@@ -71,16 +70,6 @@ def sn_check_utility(time_index, remote_ssh, local_dir):
     f.write(result)
     f.close()
 
-def sn_update_delay(remote_ssh, remote_ftp, remote_dir, local_dir,
-                    timeptr, constellation_size):
-    remote_ftp.put(
-        os.path.join(local_dir, 'delay',  f'{timeptr}.txt.gz'),
-        f'{remote_dir}/{timeptr}.txt.gz')
-    sn_remote_cmd(remote_ssh,
-        f"python3 {remote_dir}/orchestrater.py "
-        f"{remote_dir}/{timeptr}.txt.gz {constellation_size} update")
-    print("Delay updating done.")
-
 def sn_damage(remote_ssh, remote_ftp, remote_dir, local_dir,
               ratio, damage_list, constellation_size):
     print("Randomly setting damaged links...\n")
@@ -129,31 +118,6 @@ def sn_sr(src, des, target, netns_list, remote_ssh):
         f"ip route add {des_IP[0][:-3]}0/24 dev B{src}-eth{target} via {target_IP[0]}"
     )
 
-def sn_ping(src, des, time_index, constellation_size, container_id_list,
-            file_path, configuration_file_path, remote_ssh):
-    if des <= constellation_size:
-        ifconfig_output = sn_remote_cmd(remote_ssh,
-            f"ip netns exec {container_id_list[des - 1]} "
-            r"ifconfig | sed 's/[ \t].*//;/^\(eth0\|\)\(lo\|\)$/d'")
-        des_IP = sn_remote_cmd(
-            remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
-            " ifconfig " + ifconfig_output[0][:-1] +
-            "|awk -F '[ :]+' 'NR==2{print $4}'")
-    else:
-        des_IP = sn_remote_cmd(
-            remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
-            " ifconfig B" + str(des) +
-            "-default |awk -F '[ :]+' 'NR==2{print $4}'")
-    ping_result = sn_remote_cmd(
-        remote_ssh, "docker exec -i " + str(container_id_list[src - 1]) +
-        " ping " + str(des_IP[0][:-1]) + " -c 4 -i 0.01 ")
-    f = open(
-        configuration_file_path + "/" + file_path + "/ping-" + str(src) + "-" +
-        str(des) + "_" + str(time_index) + ".txt", "w")
-    f.writelines(ping_result)
-    f.close()
-
-
 def sn_perf(src, des, time_index, constellation_size, container_id_list,
             file_path, configuration_file_path, remote_ssh):
     if des <= constellation_size:
@@ -183,125 +147,3 @@ def sn_perf(src, des, time_index, constellation_size, container_id_list,
         str(des) + "_" + str(time_index) + ".txt", "w")
     f.writelines(perf_result)
     f.close()
-
-def sn_route(src, time_index, file_path, configuration_file_path,
-             container_id_list, remote_ssh):
-    route_result = sn_remote_cmd(
-        remote_ssh,
-        "docker exec -it " + str(container_id_list[src - 1]) + " route ")
-    f = open(
-        configuration_file_path + "/" + file_path + "/route-" + str(src) +
-        "_" + str(time_index) + ".txt", "w")
-    f.writelines(route_result)
-    f.close()
-
-
-def sn_establish_new_GSL(container_id_list, matrix, constellation_size, bw,
-                         loss, sat_index, GS_index, remote_ssh):
-    i = sat_index
-    j = GS_index
-    # IP address  (there is a link between i and j)
-    delay = str(matrix[i - 1][j - 1])
-    address_16_23 = (j - constellation_size) & 0xff
-    address_8_15 = i & 0xff
-    GSL_name = "GSL_" + str(i) + "-" + str(j)
-    # Create internal network in docker.
-    sn_remote_cmd(
-        remote_ssh, 'docker network create ' + GSL_name + " --subnet 9." +
-        str(address_16_23) + "." + str(address_8_15) + ".0/24")
-    print('[Create GSL:]' + 'docker network create ' + GSL_name +
-          " --subnet 9." + str(address_16_23) + "." + str(address_8_15) +
-          ".0/24")
-    sn_remote_cmd(
-        remote_ssh, 'docker network connect ' + GSL_name + " " +
-        str(container_id_list[i - 1]) + " --ip 9." + str(address_16_23) + "." +
-        str(address_8_15) + ".50")
-    ifconfig_output = sn_remote_cmd(
-        remote_ssh, "docker exec -it " + str(container_id_list[i - 1]) +
-        " ip addr | grep -B 2 9." + str(address_16_23) + "." +
-        str(address_8_15) +
-        ".50 | head -n 1 | awk -F: '{ print $2 }' | tr -d [:blank:]")
-    target_interface = str(ifconfig_output[0]).split("@")[0]
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " ip link set dev " + target_interface + " down")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " ip link set dev " + target_interface + " name " + "B" +
-        str(i - 1 + 1) + "-eth" + str(j))
-    
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " tc qdisc add dev B" + str(i - 1 + 1) + "-eth" + str(j) +
-        " root netem delay " + str(delay) + "ms")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " tc qdisc add dev B" + str(i - 1 + 1) + "-eth" + str(j) +
-        " root netem loss " + str(loss) + "%")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " tc qdisc add dev B" + str(i - 1 + 1) + "-eth" + str(j) +
-        " root netem rate " + str(bw) + "Gbps")
-    print('[Add current node:]' + 'docker network connect ' + GSL_name + " " +
-          str(container_id_list[i - 1]) + " --ip 9." + str(address_16_23) +
-          "." + str(address_8_15) + ".50")
-    print(sn_remote_cmd(
-        remote_ssh, 'docker network connect ' + GSL_name + " " +
-        str(container_id_list[j - 1]) + " --ip 9." + str(address_16_23) + "." +
-        str(address_8_15) + ".60"))
-    ifconfig_output = sn_remote_cmd(
-        remote_ssh, "docker exec -it " + str(container_id_list[j - 1]) +
-        " ip addr | grep -B 2 9." + str(address_16_23) + "." +
-        str(address_8_15) +
-        ".60 | head -n 1 | awk -F: '{ print $2 }' | tr -d [:blank:]")
-    print(ifconfig_output)
-    target_interface = str(ifconfig_output[0]).split("@")[0]
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " ip link set dev " + target_interface + " down")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " ip link set dev " + target_interface + " name " + "B" + str(j) +
-        "-eth" + str(i - 1 + 1))
-    
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " tc qdisc add dev B" + str(j) + "-eth" + str(i - 1 + 1) +
-        " root netem delay " + str(delay) + "ms")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " tc qdisc add dev B" + str(j) + "-eth" + str(i - 1 + 1) +
-        " root netem loss " + str(loss) + "%")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " tc qdisc add dev B" + str(j) + "-eth" + str(i - 1 + 1) +
-        " root netem rate " + str(bw) + "Gbps")
-    print('[Add right node:]' + 'docker network connect ' + GSL_name + " " +
-          str(container_id_list[j - 1]) + " --ip 10." + str(address_16_23) +
-          "." + str(address_8_15) + ".60")
-    
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " ip link set dev B" + str(i - 1 + 1) + "-eth" + str(j) + " up")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " ip link set dev B" + str(j) + "-eth" + str(i - 1 + 1) + " up")
-
-
-def sn_del_link(first_index, second_index, container_id_list, remote_ssh):
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " +
-        str(container_id_list[second_index - 1]) + " ip link set dev B" +
-        str(second_index) + "-eth" + str(first_index) + " down")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " +
-        str(container_id_list[first_index - 1]) + " ip link set dev B" +
-        str(first_index) + "-eth" + str(second_index) + " down")
-    GSL_name = "GSL_" + str(first_index) + "-" + str(second_index)
-    sn_remote_cmd(
-        remote_ssh, 'docker network disconnect ' + GSL_name + " " +
-        str(container_id_list[first_index - 1]))
-    sn_remote_cmd(
-        remote_ssh, 'docker network disconnect ' + GSL_name + " " +
-        str(container_id_list[second_index - 1]))
-    sn_remote_cmd(remote_ssh, 'docker network rm ' + GSL_name)

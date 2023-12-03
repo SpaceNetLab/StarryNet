@@ -69,15 +69,18 @@ def _gsl_least_delay(sat_cbf_t_shell, gs_cbf, antenna_num, bound_dis):
             gsls_t.append(gsls)
         gsls_t_shell.append(gsls_t)
     
-    # [[gsl for every shell] for every gs] for every t] TODO: better method
+    # merge different shell
+    # [[gsls for every shell] for every gs] for every t]
     gsl_shell_gs_t = [
-        [[] for gid in range(len(gs_cbf))] for t in range(len(gsls_t_shell[0]))
+        [list() for gid in range(len(gs_cbf))] for t in range(len(gsls_t_shell[0]))
     ]
     gsl_idx_dict = {}
     for t, gsl_shell_gs in enumerate(gsl_shell_gs_t):
         for gid, gsl_lst in enumerate(gsl_shell_gs):
             for shell_id in range(len(gsls_t_shell)):
                 for oid, sid, delay in gsls_t_shell[shell_id][t][gid]:
+                    if len(gsl_lst) >= antenna_num:
+                        break
                     if (gid, shell_id, oid, sid) in gsl_idx_dict:
                         idx = gsl_idx_dict[(gid, shell_id, oid, sid)]
                     else:
@@ -112,9 +115,10 @@ def _bound_gsl(antenna_elevation, altitude):
     return a + np.sqrt(np.square(a) + np.square(altitude) + 2 * altitude * 6371)
 
 def calculate_delay(
-    dir, duration, shell_lst, isl_style,
+    dir, duration, step, shell_lst, isl_style,
     GS_lat_long, antenna_number, antenna_elevation, gsl_style
     ):
+    ts_total = int(duration / step)
     cached = True
     for shell in shell_lst:
         pos_dir = os.path.join(dir, shell['name'], 'position')
@@ -123,12 +127,12 @@ def calculate_delay(
         os.makedirs(isl_dir, exist_ok=True)
         pos_files = glob.glob(os.path.join(pos_dir, '*.txt'))
         isl_files = glob.glob(os.path.join(isl_dir, '*.txt'))
-        if len(pos_files) != duration or len(isl_files) != duration:
+        if len(pos_files) != ts_total or len(isl_files) != ts_total:
             cached = False
     gsl_dir = os.path.join(dir, 'GS-' + str(len(GS_lat_long)), 'gsl')
     os.makedirs(gsl_dir, exist_ok=True)
     gsl_files = glob.glob(os.path.join(gsl_dir, '*.txt'))
-    if len(gsl_files) != duration:
+    if len(gsl_files) != ts_total:
         cached = False
     if cached and input(f"Use cached local files [y/n]?").strip().lower()[:1] == 'y':
         return
@@ -151,6 +155,7 @@ def calculate_delay(
     R = 6371393
     F = 18
     sat_cbf_t_shell = []
+    ts_lst = [i * step for i in range(ts_total)]
     for i, shell in enumerate(shell_lst):        
         inclination = shell['inclination'] * 2 * np.pi / 360
         altitude = shell['altitude'] * 1000
@@ -158,7 +163,7 @@ def calculate_delay(
         orbit_number, sat_number = shell['orbit'], shell['sat']
         num_of_sat = orbit_number * sat_number
 
-        sat_lla_t = np.zeros((duration, orbit_number, sat_number, 3))
+        sat_lla_t = np.zeros((ts_total, orbit_number, sat_number, 3))
         for oid in range(orbit_number):
             raan = oid / orbit_number * 2 * np.pi
             for sid in range(sat_number):
@@ -182,12 +187,11 @@ def calculate_delay(
                 )
                 sat = EarthSatellite.from_satrec(satrec, ts)
                 cur = datetime.datetime(2022, 1, 1, 1, 0, 0)
-                t_ts = ts.utc(*cur.timetuple()[:5],
-                                range(duration))  # [:4]:minute，[:5]:second
+                t_ts = ts.utc(*cur.timetuple()[:5], ts_lst)  # [:4]:minute，[:5]:second
                 geocentric = sat.at(t_ts)
                 subpoint = wgs84.subpoint(geocentric)
                 # list: [subpoint.latitude.degrees] [subpoint.longitude.degrees] [subpoint.elevation.km]
-                for t in range(duration):
+                for t in range(ts_total):
                     sat_lla_t[t, oid, sid] = (subpoint.latitude.degrees[t],
                                             subpoint.longitude.degrees[t],
                                             subpoint.elevation.km[t])
@@ -204,29 +208,84 @@ def calculate_delay(
     isls_t_shell = isl_styles[isl_style](sat_cbf_t_shell)
     for i, isls_t in enumerate(isls_t_shell):
         isl_dir = os.path.join(dir, shell_lst[i]['name'], 'isl')
-        for t in range(duration):
-            f = open(f"{isl_dir}/{t + 1}.txt", 'w')
+
+        isl_state = [ [list() for _ in range(shell_lst[i]['sat'])] 
+                      for _ in range(shell_lst[i]['orbit'])]
+        for t in range(ts_total):
+            f = open(f"{isl_dir}/{t}.txt", 'w')
             for oid, sat_lst in enumerate(isls_t[t]):
                 for sid, isl_lst in enumerate(sat_lst):
                     # one line for each satellite
-                    f.write(f"{oid},{sid}: ")
+                    f.write(f"{oid},{sid}|")
+                    old_lst = isl_state[oid][sid]
+                    old_del = [True] * len(old_lst)
+                    new_add = [True] * len(isl_lst)
+                    update = []
+                    for i, old in enumerate(old_lst):
+                        for j, new in enumerate(isl_lst):
+                            if old[0] != new[0]:
+                                continue
+                            old_del[i] = False
+                            new_add[j] = False
+                            if abs(new[3] - old[3]) > 1e-2:
+                                update.append(new)
+                            else:
+                                isl_lst[j] = old
+                    # del some isls
                     f.write(' '.join(
-                        f"{isl[0]},{isl[1]},{isl[2]},{isl[3]:.2f}"for isl in isl_lst
-                    ))
-                    f.write('\n')
+                        f"{isl[0]},{isl[1]},{isl[2]},{isl[3]:.2f}"
+                        for isl, de in zip(old_lst, old_del) if de
+                    ) + '|')
+                    # update some isls
+                    f.write(' '.join(
+                        f"{isl[0]},{isl[1]},{isl[2]},{isl[3]:.2f}"
+                        for isl in update
+                    ) + '|')
+                    # add some isls
+                    f.write(' '.join(
+                        f"{isl[0]},{isl[1]},{isl[2]},{isl[3]:.2f}"
+                        for isl, add in zip(isl_lst, new_add) if add
+                    ) + '\n')
+                    isl_state[oid][sid] = isl_lst
                 f.write('\n')
             f.close()
     
     gs_cbf = _to_cbf(np.array(GS_lat_long))
     bound_dis = _bound_gsl(antenna_elevation, shell['altitude'])
     gsls_t = gsl_styles[gsl_style](sat_cbf_t_shell, gs_cbf, antenna_number, bound_dis)
+    gsl_state = [list() for _ in range(len(GS_lat_long))]
     for t, gsls in enumerate(gsls_t):
-        f = open(f"{gsl_dir}/{t + 1}.txt", 'w')
+        f = open(f"{gsl_dir}/{t}.txt", 'w')
         for gid, gsl_lst in enumerate(gsls):
             # one line for each ground station
-            f.write(f"{gid}: ")
+            f.write(f"{gid}|")
+            # add some isls
+            old_lst = gsl_state[gid]
+            old_del = [True] * len(old_lst)
+            new_add = [True] * len(gsl_lst)
+            update = []
+            for i, old in enumerate(old_lst):
+                for j, new in enumerate(gsl_lst):
+                    if old[0] == new[0]:
+                        old_del[i] = False
+                        new_add[j] = False
+                        if abs(new[4] - old[4]) > 1e-2:
+                            update.append(new)
+                        else:
+                            gsl_lst[j] = old # if not update, remain old delay
             f.write(' '.join(
-                f"{gsl[0]},{gsl[1]},{gsl[2]},{gsl[3]},{gsl[4]:.2f}" for gsl in gsl_lst
-            ))
-            f.write('\n')
+                f"{gsl[0]},{gsl[1]},{gsl[2]},{gsl[3]},{gsl[4]:.2f}"
+                for gsl, de in zip(old_lst, old_del) if de
+            ) + '|')
+            # update some gsls
+            f.write(' '.join(
+                f"{gsl[0]},{gsl[1]},{gsl[2]},{gsl[3]},{gsl[4]:.2f}"
+                for gsl in update
+            ) + '|')
+            # del some gsls
+            f.write(' '.join(
+                f"{gsl[0]},{gsl[1]},{gsl[2]},{gsl[3]},{gsl[4]:.2f}"
+                for gsl, add in zip(gsl_lst, new_add) if add
+            ) + '\n')
+            gsl_state[gid] = gsl_lst
         f.close()
