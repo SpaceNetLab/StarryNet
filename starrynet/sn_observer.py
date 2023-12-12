@@ -514,7 +514,7 @@ class Observer():
                 Q.append("    interface \"inter_machine\" {")
                 Q.append("        type broadcast;		# Detected by default")
                 Q.append("        cost 256;")
-                Q.append("        hello " + str(interval) +
+                Q.append("        hello " + str(self.hello_interval) +
                          ";			# Default hello perid 10 is too long")
                 Q.append("    };")
                 Q.append("    };")
