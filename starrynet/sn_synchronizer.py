@@ -7,6 +7,7 @@ author: Zeqi Lai (zeqilai@tsinghua.edu.cn) and Yangtao Deng (dengyt21@mails.tsin
 import time
 import threading
 import zipfile
+import math
 from starrynet.sn_observer import *
 from starrynet.sn_utils import *
 
@@ -34,24 +35,40 @@ protocol ospf{
         import all;
     };
     area 0 {
-    interface "*-SH*O*S*" {
+    interface "SH*O*S*" {
         type broadcast; # Detected by default
         cost 256;
-        hello 5;        # Default hello perid 10 is too long
+        hello %d;
     };
-    interface "*-GS*" {
+    interface "GS*" {
         type broadcast; # Detected by default
         cost 256;
-        hello 5;        # Default hello perid 10 is too long
+        hello %d;
     };
-    interface "B*-default" {
+    interface "POP" {
         type broadcast; # Detected by default
         cost 256;
-        hello 10;        # Default hello perid 10 is too long
+        hello %d;
     };
     };
 }
 """
+
+def _sat_name(shell_id, orbit_id, sat_id):
+    return f'SH{shell_id+1}O{orbit_id+1}S{sat_id+1}'
+
+def _sat2idx(sat_name):
+    idx1 = sat_name.find('O')
+    idx2 = sat_name.find('S', idx1)
+    shell_id = int(sat_name[2:idx1])-1
+    oid, sid = int(sat_name[idx1+1:idx2])-1, int(sat_name[idx2+1:])-1
+    return shell_id, oid, sid
+
+def _gs2idx(gs_name):
+    return int(node[2:])-1
+
+def _gs_name(gid):
+    return f'GS{gid+1}'
 
 class RemoteMachine:
     
@@ -74,13 +91,13 @@ class RemoteMachine:
             self.dir + '/sn_orchestrater.py'
         )
         self.sftp.put(
+            os.path.join(os.path.dirname(__file__), 'pyctr.c'),
+            self.dir + '/pyctr.c'
+        )
+        self.sftp.put(
             os.path.join(self.local_dir, 'bird.conf'),
             self.dir + '/bird.conf'
         )
-        # self.sftp.put(
-        #     os.path.join(self.local_dir, 'pyctr.so'),
-        #     self.dir + '/pyctr.so'
-        # )
         self.sftp.put(
             os.path.join(self.local_dir, ASSIGN_FILENAME),
             self.dir + '/' + ASSIGN_FILENAME
@@ -91,6 +108,12 @@ class RemoteMachine:
             self.ssh,
             f"python3 {self.dir}/sn_orchestrater.py {self.id} nodes {self.dir}"
         )
+    
+    def get_nodes(self):
+        return sn_remote_cmd(
+            self.ssh,
+            f"python3 {self.dir}/sn_orchestrater.py {self.id} list {self.dir}"
+        ).splitlines()
     
     def init_network(self, isl_bw, isl_loss, gsl_bw, gsl_loss):
         for shell in self.shell_lst:
@@ -125,18 +148,30 @@ class RemoteMachine:
             f"{t} {isl_bw} {isl_loss} {gsl_bw} {gsl_loss}"
         )
     
-    def init_routed(self):
+    def init_routed(self, nodes):
         print(sn_remote_cmd(
             self.ssh,
-            f"python3 {self.dir}/sn_orchestrater.py {self.id} routed {self.dir}"
+            f"python3 {self.dir}/sn_orchestrater.py {self.id} routed {self.dir} "
+            +','.join(nodes)
         ))
     
+    def get_IP(self, node):
+        lines = sn_remote_cmd(
+            self.ssh,
+            f"python3 {self.dir}/sn_orchestrater.py {self.id} IP {self.dir} {node}"
+        ).splitlines()
+        IP_dict = {}
+        for line in lines:
+            dev_IP = line.strip().split()
+            IP_dict[dev_IP[0]] = dev_IP[1]
+        return IP_dict
+
     def ping_async(self, res_path, src, dst):
         def _ping_inner(ssh, dir, res_path, src, dst):
             output = sn_remote_cmd(
                 ssh,
                 f"python3 {dir}/sn_orchestrater.py {self.id} ping {dir} "
-                f"{src[0]} {src[1]} {src[2]} {dst[0]} {dst[1]} {dst[2]}"
+                f"{src} {dst} 2>&1"
             )
             with open(res_path, 'w') as f:
                 f.write(output)
@@ -147,15 +182,57 @@ class RemoteMachine:
         thread.start()
         return thread
     
-    def perf_async(self, src, dst):
+    def iperf_async(self, res_path, src, dst):
+        def _iperf_inner(ssh, dir, res_path, src, dst):
+            output = sn_remote_cmd(
+                ssh,
+                f"python3 {self.dir}/sn_orchestrater.py {self.id} iperf {self.dir} "
+                f"{src} {dst} 2>&1"
+            )
+            with open(res_path, 'w') as f:
+                f.write(output)
+
         thread = threading.Thread(
-            target=sn_remote_cmd,
-            args=(self.ssh,
-                  f"python3 {self.dir}/sn_orchestrater.py {self.id} perf {self.dir} "
-                  f"{src[0]} {src[1]} {src[2]} {dst[0]} {dst[1]} {dst[2]}"),
+            target=_iperf_inner,
+            args=(self.ssh, self.dir, res_path, src, dst)
         )
         thread.start()
         return thread
+    
+    def sr(self, src, dst, next_hop):
+        sn_remote_cmd(
+            self.ssh,
+            f"python3 {self.dir}/sn_orchestrater.py {self.id} sr {self.dir} "
+            f"{src} {dst} {next_hop} 2>&1"
+        )
+
+    def check_route(self, res_path, sat):
+        output = sn_remote_cmd(
+            self.ssh,
+            f"python3 {self.dir}/sn_orchestrater.py {self.id} rtable {self.dir} "
+            f"{sat} 2>&1"
+        )
+        with open(res_path, 'w') as f:
+            f.write(output)
+    
+    def check_utility(self, res_path):
+        output = sn_remote_cmd(self.ssh, "vmstat 2>&1")
+        with open(res_path, 'w') as f:
+            f.write(output)
+        
+    def damage(self, random_lst):
+        sn_remote_cmd(
+            self.ssh,
+            f"python3 {self.dir}/sn_orchestrater.py {self.id} damage {self.dir} "
+            + ','.join(random_lst)
+        )
+        
+    def recovery(self, sat_loss):
+        sn_remote_cmd(
+            self.ssh,
+            f"python3 {self.dir}/sn_orchestrater.py {self.id} recovery {self.dir} "
+            f"{sat_loss}"
+        )
 
     def clean(self):
         sn_remote_cmd(
@@ -165,7 +242,7 @@ class RemoteMachine:
 
 class StarryNet():
 
-    def __init__(self, configuration_file_path, GS_lat_long):
+    def __init__(self, configuration_file_path, GS_lat_long, hello_interval):
         # Initialize constellation information.
         sn_args = sn_load_file(configuration_file_path)
         self.shell_lst = sn_args.shell_lst
@@ -192,7 +269,7 @@ class StarryNet():
                             f"-{shell['phase_shift']}"
 
         self.local_dir = os.path.join(self.configuration_dir, self.experiment_name)
-        self._init_local()
+        self._init_local(hello_interval)
         # Initiate a necessary delay and position data for emulation
         calculate_delay(
             self.local_dir, self.duration, self.step, self.shell_lst, self.link_style,
@@ -201,23 +278,16 @@ class StarryNet():
         (self.remote_lst,
          self.sat_mid_lst, self.gs_mid) = self._assign_remote(sn_args.machine_lst)
 
-        self.utility_checking_time = []
-        self.route_checking_events = []
-        self.ping_events = []
-        self.perf_events = []
-        self.sr_events = []
-        self.damage_events = []
-        self.damage_list = []
-        self.recovery_events = []
+        self.events = []
     
-    def _init_local(self):
+    def _init_local(self, hello_interval):
         for txt_file in glob.glob(os.path.join(self.local_dir, '*.txt')):
             os.remove(txt_file)
         for shell in self.shell_lst:
             os.makedirs(os.path.join(self.local_dir, shell['name']), exist_ok=True)
         os.makedirs(os.path.join(self.local_dir, self.gs_dirname), exist_ok=True)
         with open(os.path.join(self.local_dir, 'bird.conf'), 'w') as f:
-            f.write(BIRD_CONF_TEXT)
+            f.write(BIRD_CONF_TEXT % (hello_interval, hello_interval, hello_interval))
 
     def _assign_remote(self, machine_lst):
         # TODO: better partition
@@ -295,6 +365,21 @@ class StarryNet():
         for remote in self.remote_lst:
             remote.init_nodes()
         print("Node initialization:", time.time() - begin, "s consumed.")
+        self._load_node_map()
+
+    def _load_node_map(self):
+        self.node_map = {}
+        self.undamaged_lst = list()
+        self.total_sat_lst = list()
+        for remote in self.remote_lst:
+            for node in remote.get_nodes():
+                if node.startswith('Error'):
+                    print(node)
+                    exit(1)
+                if node.startswith('SH'):
+                    self.undamaged_lst.append(node)
+                    self.total_sat_lst.append(node)
+                self.node_map[node.strip()] = remote
 
     def create_links(self):
         print('Initializing links ...')
@@ -314,100 +399,198 @@ class StarryNet():
             thread.join()
         print("Link initialization:", time.time() - begin, 's consumed.')
 
-    def run_routing_deamon(self):
+    def run_routing_deamon(self, node_lst='all'):
         print('Initializing routing ...')
-        for remote in self.remote_lst:
-            remote.init_routed()
-        print("Routing daemon initialized. Wait 30s for route converged")
+        if node_lst == 'all':
+            for remote in self.remote_lst:
+                remote.init_routed(['all'])
+            print("Routing daemon initialized. Wait 30s for route converged")
+        else:
+            rtd_lsts = {machine:[] for machine in self.remote_lst}
+            for node in node_lst:
+                rtd_lsts[self.node_map[node]].append(node)
+            for remote, nodes in rtd_lsts.items():
+                if len(nodes) > 0:
+                    remote.init_routed(nodes)
+        
         for i in range(30):
             print(f'\r{i} / 30', end=' ')
             time.sleep(1)
         print("Routing started!")
 
-    def get_distance(self, shell1, orbit1, sat1, shell2, orbit2, sat2, t):
-        raise NotImplementedError
+    # static information
+    def get_distance(self, node1, node2, time_index):
+        def _get_xyz(node):
+            if node.startswith('SH'):
+                shell_id, oid, sid = _sat2idx(node)
+                shell = self.shell_lst[shell_id]
+                lla_mat = load_pos(os.path.join(
+                    self.local_dir,
+                    shell['name'],
+                    'position',
+                    f'{time_index}.txt'
+                ))
+                return to_cbf(lla_mat[oid][sid])
+            elif node.startswith('GS'):
+                return to_cbf(self.gs_lat_long[_gs2idx(node)])
+            else:
+                raise NotImplementedError
 
-    def get_neighbors(self, sat_index, time_index):
-        raise NotImplementedError
+        xyz1, xyz2 = _get_xyz(node1), _get_xyz(node2)
+        dx, dy, dz = xyz1[0] - xyz2[0], xyz1[1] - xyz2[1], xyz1[2] - xyz2[2]
+        return math.sqrt(dx * dx + dy * dy + dz * dz)
 
-    def get_GSes(self, sat_index, time_index):
-        raise NotImplementedError
+    def get_neighbors(self, sat, time_index):
+        if not sat.startswith('SH'):
+            raise RuntimeError('Not a satellite')
+        shell_id, oid, sid = _sat2idx(sat)
+        shell = self.shell_lst[shell_id]
 
-    def get_utility(self, time_index):
-        self.utility_checking_time.append(time_index)
+        isl_mat = load_isl_state(os.path.join(
+            self.local_dir,
+            shell['name'],
+            'isl',
+            f'{time_index}-state.txt'
+        ))
+        neighbors = []
+        for isl in isl_mat[oid][sid]:
+            isl = isl.split(',')
+            neighbors.append(_sat_name(shell_id, int(isl[1]), int(isl[2])))
+        for orbit, isls_lst in enumerate(isl_mat):
+            for sat, isls in enumerate(isls_lst):
+                for isl in isls:
+                    isl = isl.split(',')
+                    if int(isl[1]) == oid and int(isl[2]) == sid:
+                        neighbors.append(_sat_name(shell_id, orbit, sat))
+        return neighbors
 
-    def get_position(self, shell1, orbit1, sat1, time_index):
-        path = self.local_dir + '/position/%d.txt' % time_index
-        f = open(path)
-        ADJ = f.readlines()
-        f.close()
-        return ADJ[sat_index - 1]
+    def get_GSes(self, sat, time_index):
+        if not sat.startswith('SH'):
+            raise RuntimeError('Not a Satellite')
+        shell_id, oid, sid = _sat2idx(sat)
+        shell = self.shell_lst[shell_id]
 
-    def get_IP(self, sat_index):
-        raise NotImplementedError
+        gsl_lst = load_gsl_state(os.path.join(
+            self.local_dir,
+            self.gs_dirname,
+            'gsl',
+            f'{time_index}-state.txt'
+        ))
+        GSes = []
+        for gid, gsls in enumerate(gsl_lst):
+            for gsl in gsls:
+                gsl = gsl.split(',')
+                if int(gsl[1]) == shell_id \
+                and int(gsl[2]) == oid \
+                and int(gsl[3]) == sid:
+                    GSes.append(_gs_name(gid))
+        return GSes
+
+    def get_position(self, node, time_index):
+        if node.startswith('SH'):
+            shell_id, oid, sid = _sat2idx(node)
+            shell = self.shell_lst[shell_id]
+
+            lla_mat = load_pos(os.path.join(
+                self.local_dir,
+                shell['name'],
+                'position',
+                f'{time_index}.txt'
+            ))
+            return lla_mat[oid][sid]
+        elif node.startswith('GS'):
+            return self.gs_lat_long[_gs2idx(node)]
+        else:
+            raise NotImplementedError
+
+    def get_IP(self, node):
+        if not hasattr(self, 'node_map'):
+            self._load_node_map()
+        return self.node_map[node].get_IP(node)
+
+    # dynamic events
+    def get_utility(self, t):
+        def _check_utility(real_t):
+            for mid, machine in enumerate(self.remote_lst):
+                machine.check_utility(os.path.join(
+                    self.local_dir, f'{real_t}-utility-machine{mid}.txt')
+                )
+        self.events.append((t, _check_utility,))
 
     def set_damage(self, damaging_ratio, t):
-        self.damage_events.append((t, damaging_ratio))
+        def _damage(real_t, damaging_ratio):
+            damage_lsts = {machine:[] for machine in self.remote_lst}
+            cur_num = len(self.undamaged_lst)
+            need_damage_num = min(len(self.total_sat_lst) * damaging_ratio, cur_num)
+            while(cur_num - len(self.undamaged_lst) < need_damage_num):
+                sat = self.undamaged_lst.pop(
+                    random.randint(0, len(self.undamaged_lst) - 1)
+                )
+                machine = self.node_map[sat]
+                damage_lsts[machine].append(sat)
+            for machine, lst in damage_lsts.items():
+                machine.damage(lst)
+        self.events.append((t, _damage, damaging_ratio,))
 
     def set_recovery(self, t):
-        self.recovery_events.append(t)
+        def _recovery(real_t):
+            for machine in self.remote_lst:
+                machine.recovery(self.sat_loss)
+            self.undamaged_lst = self.total_sat_lst.copy()
+        self.events.append((t, _recovery,))
 
-    def check_routing_table(self, sat_index, t):
-        self.route_checking_events.append((t, sat_index))
+    def check_routing_table(self, node, t):
+        def _check_route(real_t, node):
+            machine = self.node_map[node]
+            machine.check_route(
+                os.path.join(self.local_dir, f'{real_t}-route-{node}.txt'),
+                node
+            )
+        self.events.append((t, _check_route, node,))
 
-    def set_next_hop(self,
-            src_shell, src_orbit, src_sat,
-            des_shell, des_orbit, des_sat,
-            nxt_shell, nxt_orbit, nxt_sat, t
-        ):
-        self.sr_events.append(
-            (t,
-             (src_shell, src_orbit, src_sat),
-             (des_shell, des_orbit, des_sat),
-             (nxt_shell, nxt_orbit, nxt_sat))
-        )
+    def set_next_hop(self, src, dst, next_hop, t):
+        def _set_next_hop(real_t, src, dst, next_hop):
+            machine = self.node_map[src]
+            machine.sr(src, dst, next_hop)
+        self.events.append((t, _set_next_hop, src, dst, next_hop))
 
-    def set_ping(self, shell1, orbit1, sat1, shell2, orbit2, sat2, t):
-        self.ping_events.append(
-            (t, (shell1-1, orbit1-1, sat1-1), (shell2-1, orbit2-1, sat2-1))
-        )
-
-    def set_perf(self, shell1, orbit1, sat1, shell2, orbit2, sat2, t):
-        self.perf_events.append(
-            (t, (shell1-1, orbit1-1, sat1-1), (shell2-1, orbit2-1, sat2-1))
-        )
-    
-    def event(self, t):
-        while len(self.ping_events) > 0 and self.ping_events[-1][0] <= t:
-            ping_event = self.ping_events.pop(-1)
-            src_shell, src_sid = ping_event[1][0], ping_event[1][2]
-            machine = self.remote_lst[self.sat_mid_lst[src_shell][src_sid]]
+    def set_ping(self, src, dst, t):
+        def _ping(real_t, src, dst):
+            machine = self.node_map[src]
             self.ping_threads.append(machine.ping_async(
-                os.path.join(
-                    self.local_dir, f'{t}-ping-{ping_event[1]}-{ping_event[2]}.txt'),
-                ping_event[1],
-                ping_event[2]
+                os.path.join(self.local_dir, f'{real_t}-ping-{src}-{dst}.txt'),
+                src, dst
             ))
-        while len(self.perf_events) > 0 and self.perf_events[-1][0] <= t:
-            perf_event = self.perf_events.pop(-1)
-            machine = self.remote_lst[self.sat_mid_lst[perf_event[1][0]]]
-            self.perf_threads.append(machine.perf_async(
-                perf_event[1],
-                perf_event[2]
+        self.events.append((t, _ping, src, dst))
+
+    def set_iperf(self, src, dst, t):
+        def _iperf(real_t, src, dst):
+            machine = self.node_map[src]
+            self.iperf_threads.append(machine.iperf_async(
+                os.path.join(self.local_dir, f'{real_t}-iperf-{src}-{dst}.txt'),
+                src, dst
             ))
-        # TODO: other events
+        self.events.append((t, _iperf, src, dst))
+    
+    def _event(self, real_t):
+        while len(self.events) > 0 and self.events[-1][0] <= real_t:
+            event = self.events.pop(-1)
+            event[1](real_t, *event[2:])
 
     def start_emulation(self):
-        self.ping_events.sort(key=lambda x:x[0], reverse=True)
-        self.perf_events.sort(key=lambda x:x[0], reverse=True)
+        self.events.sort(key=lambda x:x[0], reverse=True)
+
+        if not hasattr(self, 'node_map'):
+            self._load_node_map()
+
         self.ping_threads = []
-        self.perf_threads = []
+        self.iperf_threads = []
         t = 0.0
         tid = 1
         while t < self.duration:
             start = time.time()
-            print("Trigger events at", t, "s ...")
-            self.event(t)
+            print("\nTrigger events at", t, "s ...")
+            self._event(t)
             print("Update networks ...")
             update_start = time.time()
             if tid < self.duration:
@@ -434,8 +617,8 @@ class StarryNet():
             tid += 1
         for ping_thread in self.ping_threads:
             ping_thread.join()
-        for perf_thread in self.perf_threads:
-            perf_thread.join()
+        for iperf_thread in self.iperf_threads:
+            iperf_thread.join()
 
     def clean(self):
         print("Removing containers and links...")

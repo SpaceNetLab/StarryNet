@@ -11,8 +11,10 @@ Used in the remote machine for link updating, initializing links, damaging and r
 author: Yangtao Deng (dengyt21@mails.tsinghua.edu.cn) and Zeqi Lai (zeqilai@tsinghua.edu.cn) 
 """
 
-PID_FILENAME = 'container_pid.txt'
 ASSIGN_FILENAME = 'assign.txt'
+PID_FILENAME = 'container_pid.txt'
+DAMAGE_FILENAME = 'damage_list.txt'
+
 NOT_ASSIGNED = 'NA'
 VXLAN_PORT = 4789
 # FIXME
@@ -25,17 +27,27 @@ def _sat_name(shell_id, orbit_id, sat_id):
 def _gs_name(gid):
     return f'GS{gid+1}'
 
-def _pid_matrix(path, pop = False):
-    global _mat_cache
-    if path not in _mat_cache:
-        with open(path, 'r') as f:
-            _mat_cache[path] = [
-                [pid for pid in line.strip().split(' ')]
-                for line in f if len(line) > 0 and not line.isspace()
-            ]
+def _pid_map(pid_path, pop = False):
+    global _pid_map_cache
+    if _pid_map_cache is None:
+        _pid_map_cache = {}
+        if not os.path.exists(pid_path):
+            print('Error: container index file not found, please create nodes')
+            exit(1)
+        with open(pid_path, 'r') as f:
+            for line in f:
+                if len(line) == 0 or line.isspace():
+                    continue
+                for name_pid in line.strip().split():
+                    if name_pid == NOT_ASSIGNED:
+                        continue
+                    name_pid = name_pid.split(':')
+                    _pid_map_cache[name_pid[0]] = name_pid[1]
     if pop:
-        return _mat_cache.pop(path)
-    return _mat_cache[path]
+        ret = _pid_map_cache
+        _pid_map_cache = None
+        return ret
+    return _pid_map_cache
 
 def _get_params(path):
     with open(path, 'r') as f:
@@ -111,7 +123,7 @@ def _parse_gsls(path):
 
 # name1 in local machine
 def _del_link(idx, name1, name2):
-    n1_n2 = f"{idx}-{name2}"
+    n1_n2 = f"{name2}"
     fd = os.open('/run/netns/' + name1, os.O_RDONLY)
     libc.setns(fd, CLONE_NEWNET)
     os.close(fd)
@@ -138,19 +150,19 @@ def _update_if(name, if_name, delay, bw, loss):
     )
 
 def _update_link_intra_machine(idx, name1, name2, delay, bw, loss):
-    n1_n2 = f"{idx}-{name2}"
-    n2_n1 = f"{idx}-{name1}"
+    n1_n2 = f"{name2}"
+    n2_n1 = f"{name1}"
     _update_if(name1, n1_n2, delay, bw, loss)
     _update_if(name2, n2_n1, delay, bw, loss)
 
 # name1 in local machine
 def _update_link_local(idx, name1, name2, delay, bw, loss):
-    n1_n2 = f"{idx}-{name2}"
+    n1_n2 = f"{name2}"
     _update_if(name1, n1_n2, delay, bw, loss)
 
 def _add_link_intra_machine(idx, name1, name2, prefix, delay, bw, loss):
-    n1_n2 = f"{idx}-{name2}"
-    n2_n1 = f"{idx}-{name1}"
+    n1_n2 = f"{name2}"
+    n2_n1 = f"{name1}"
     subprocess.check_call(
         ('ip', 'link', 'add', n1_n2, 'netns', name1,
          'type', 'veth', 'peer', n2_n1, 'netns', name2)
@@ -159,8 +171,8 @@ def _add_link_intra_machine(idx, name1, name2, prefix, delay, bw, loss):
     _init_if(name2, n2_n1, prefix+'.40/24', delay, bw, loss)
     
 def _add_link_inter_machine(idx, name1, name2, remote_ip, prefix, delay, bw, loss):
-    n1_n2 = f"{idx}-{name2}"
-    n2_n1 = f"{idx}-{name1}"
+    n1_n2 = f"{name2}"
+    n2_n1 = f"{name1}"
     subprocess.check_call(
         ('ip', 'link', 'add', n1_n2, 'type', 'vxlan',
          'id', str(idx), 'remote', remote_ip, 'dstport', VXLAN_PORT)
@@ -173,14 +185,24 @@ def sn_init_nodes(dir, gs_mid, sat_mid_lst):
         netns_link = f'/run/netns/{name}'
         if not os.path.exists(netns_link):
             subprocess.check_call(('ln', '-s', f'/proc/{pid}/ns/net', netns_link))
+        sn_container_check_call(
+            pid,
+            ('sysctl', 'net.ipv6.conf.all.forwarding=1'),
+            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
+        )
+        sn_container_check_call(
+            pid, 
+            ('sysctl', 'net.ipv4.conf.all.forwarding=1'),
+            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
+        )
 
+    pid_file = open(dir + '/' + PID_FILENAME, 'w', encoding='utf-8')
     for shell_id, (orbit_num, shell_name, sat_mid) in enumerate(sat_mid_lst):
         if all(assign != machine_id for assign in sat_mid):
             continue
         shell_dir = f"{dir}/{shell_name}"
         overlay_dir = shell_dir + '/overlay'
         os.makedirs(overlay_dir, exist_ok=True)
-        pid_file = open(shell_dir + '/' + PID_FILENAME, 'w', encoding='utf-8')
         for sid, assign in enumerate(sat_mid):
             if assign != machine_id:
                 pid_file.write(' '.join(NOT_ASSIGNED for _ in range(orbit_num)) + '\n')
@@ -189,25 +211,32 @@ def sn_init_nodes(dir, gs_mid, sat_mid_lst):
             for oid in range(orbit_num):
                 name = _sat_name(shell_id, oid, sid)
                 node_dir = f'{overlay_dir}/{name}'
-                pid_file.write(str(pyctr.container_run(node_dir, name)) + ' ')
+                pid_file.write(name+':'+str(pyctr.container_run(node_dir, name))+' ')
             pid_file.write('\n')
-        pid_file.close()
     if len(gs_mid) > 0 and any(assign == machine_id for assign in gs_mid):
         gs_dir = f"{dir}/GS-{len(gs_mid)}"
         overlay_dir = gs_dir + '/overlay'
         os.makedirs(overlay_dir, exist_ok=True)
-        pid_file = open(gs_dir + '/' + PID_FILENAME, 'w', encoding='utf-8')
+        gs_lst = []
         for gid, assign in enumerate(gs_mid):
             if assign != machine_id:
                 pid_file.write(NOT_ASSIGNED + ' ')
                 continue
-            print(f'[{machine_id}] GS: {gid}/{len(gs_mid)}')
+            gs_lst.append(str(gid))
             name = _gs_name(gid)
             node_dir = f'{overlay_dir}/{name}'
-            pid_file.write(str(pyctr.container_run(node_dir, name)) + ' ')
+            pid_file.write(name+':'+str(pyctr.container_run(node_dir, name))+' ')
         pid_file.write('\n')
-        pid_file.close()
-    sn_operate_every_node(dir, sat_mid_lst, gs_mid, _load_netns)
+        print(f'[{machine_id}] GS:', ','.join(gs_lst))
+
+    pid_file.close()
+    subprocess.check_call(('sysctl', 'net.ipv4.neigh.default.gc_thresh1=4096'))
+    subprocess.check_call(('sysctl', 'net.ipv4.neigh.default.gc_thresh2=8192'))
+    subprocess.check_call(('sysctl', 'net.ipv4.neigh.default.gc_thresh3=16384'))
+    subprocess.run(('sysctl', 'net.ipv6.neigh.default.gc_thresh1=4096'))
+    subprocess.run(('sysctl', 'net.ipv6.neigh.default.gc_thresh2=8192'))
+    subprocess.run(('sysctl', 'net.ipv6.neigh.default.gc_thresh3=16384'))
+    sn_operate_every_node(dir, _load_netns)
 
 def sn_update_network(
         dir, ts, sat_mid_lst, gs_mid, ip_lst,
@@ -352,57 +381,136 @@ def sn_update_network(
     print(f"[{machine_id}] GSL:",
           f"{del_cnt} deleted, {update_cnt} updated, {add_cnt} added.")
 
-def sn_container_check_call(pid, cmd):
+def sn_container_check_call(pid, cmd, *args, **kwargs):
     subprocess.check_call(
-        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', pid, *cmd)
+        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', pid, *cmd),
+        *args, **kwargs
     )
 
-def sn_container_check_output(pid, cmd):
+def sn_container_check_output(pid, cmd, *args, **kwargs):
     return subprocess.check_output(
-        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', pid, *cmd)
+        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', pid, *cmd),
+        *args, **kwargs
     )
 
-def sn_operate_every_node(dir, sat_mid_lst, gs_mid, func, *args):
+def sn_operate_every_node(dir, func, *args):
     for shell_id, (orbit_num, shell_name, sat_mid) in enumerate(sat_mid_lst):
-        pid_file = f"{dir}/{shell_name}/{PID_FILENAME}"
-        if not os.path.exists(pid_file):
-            continue
-        pid_mat = _pid_matrix(pid_file)
-        for sid, pid_lst in enumerate(pid_mat):
-            for oid, pid in enumerate(pid_lst):
-                if pid == NOT_ASSIGNED:
-                    continue
-                func(pid, _sat_name(shell_id, oid, sid), *args)
-    gs_dir = f"{dir}/GS-{len(gs_mid)}"
-    if not os.path.exists(gs_dir):
-        return
-    pid_mat = _pid_matrix(gs_dir + '/' + PID_FILENAME)
-    assert len(pid_mat) == 1
-    for gid, pid in enumerate(pid_mat[0]):
-        if pid == NOT_ASSIGNED:
-            continue
-        func(int(pid), _gs_name(gid), *args)
+        pid_map = _pid_map(dir + '/' + PID_FILENAME)
+        for name, pid in pid_map.items():
+            func(pid, name, *args)
 
-def sn_init_route_daemons(dir, sat_mid_lst, gs_mid, conf_path):
+def get_IP(dir, node):
+    pid = _pid_map(f"{dir}/{PID_FILENAME}")[node]
+    addr_lst = subprocess.check_output(
+        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', pid,
+        'ip', '-br', 'addr', 'show')
+    ).decode().splitlines()
+    for dev_state_addrs in addr_lst:
+        dev_state_addrs = dev_state_addrs.split()
+        if len(dev_state_addrs) < 3:
+            continue
+        print(dev_state_addrs[0].split('@')[0], dev_state_addrs[2])
+
+def sn_init_route_daemons(dir, conf_path, nodes):
     def _init_route_daemon(pid, name):
         bird_ctl_path = conf_path[:conf_path.rfind('/')] + '/bird.ctl'
         sn_container_check_call(pid, ('bird', '-c', conf_path, '-s', bird_ctl_path))
-    sn_operate_every_node(dir, sat_mid_lst, gs_mid, _init_route_daemon)
+    if nodes == 'all':
+        sn_operate_every_node(dir, _init_route_daemon)
+    else:
+        pid_map = _pid_map(f"{dir}/{PID_FILENAME}")
+        nodes_lst = nodes.split(',')
+        for node in nodes_lst:
+            _init_route_daemon(pid_map[node], node)
 
-def sn_ping(dir,sat_mid_lst, src_shell, src_oid, src_sid, dst_shell, dst_oid, dst_sid):
+def sn_ping(dir, src, dst):
+    pid_map = _pid_map(f"{dir}/{PID_FILENAME}")
     # suppose src in this machine
-    mat1 = _pid_matrix(f"{dir}/{sat_mid_lst[src_shell][1]}/{PID_FILENAME}")
+    src_pid = pid_map[src]
     # TODO: dst in other machine
-    mat2 = _pid_matrix(f"{dir}/{sat_mid_lst[dst_shell][1]}/{PID_FILENAME}")
-    dst_addr = subprocess.check_output(
-        "nsenter -m -u -i -n -p -t " + mat2[dst_sid][dst_oid] + " ip -br addr "
-        "| awk '$1!=\"lo\"{print $3}'", shell=True
-    ).decode().splitlines()[0]
+    dst_pid = pid_map[dst]
+    
+    dst_addr_lst = subprocess.check_output(
+        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', dst_pid,
+        'ip', '-br', 'addr', 'show')
+    ).decode().splitlines()
+    for dev_state_addrs in dst_addr_lst:
+        dev_state_addrs = dev_state_addrs.split()
+        if dev_state_addrs[0] == 'lo':
+            continue
+        dst_addr = dev_state_addrs[2]
+        if dev_state_addrs[0].split('@')[0] == src:
+            break
     dst_addr = dst_addr[:dst_addr.rfind('/')]
+    print('ping', src, dst_addr)
+
     subprocess.run(
-        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', mat2[src_sid][src_oid],
+        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', src_pid,
          'ping', '-c', '4', '-i', '0.01', dst_addr),
          stdout=sys.stdout, stderr=subprocess.STDOUT
+    )
+
+def sn_iperf(dir, src, dst):
+    pid_map = _pid_map(f"{dir}/{PID_FILENAME}")
+    # suppose src in this machine
+    src_pid = pid_map[src]
+    # TODO: dst in other machine
+    dst_pid = pid_map[dst]
+    
+    dst_addr_lst = subprocess.check_output(
+        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', dst_pid,
+        'ip', '-br', 'addr', 'show')
+    ).decode().splitlines()
+    for dev_state_addrs in dst_addr_lst:
+        dev_state_addrs = dev_state_addrs.split()
+        if dev_state_addrs[0] == 'lo':
+            continue
+        dst_addr = dev_state_addrs[2]
+        if dev_state_addrs[0].split('@')[0] == src:
+            break
+    dst_addr = dst_addr[:dst_addr.rfind('/')]
+
+    server = subprocess.Popen(
+        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', dst_pid,
+         'iperf3', '-s'),
+         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
+    )
+    subprocess.run(
+        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', src_pid,
+         'iperf3', '-c', dst_addr, '-t5'),
+         stdout=sys.stdout, stderr=subprocess.STDOUT
+    )
+    server.terminate()
+
+def sn_sr(dir, src, dst, nxt):
+    pid_map = _pid_map(f"{dir}/{PID_FILENAME}")
+    # suppose src in this machine
+    src_pid = pid_map[src]
+    # TODO: dst in other machine
+    dst_pid = pid_map[dst]
+
+    dst_addr_lst = subprocess.check_output(
+        ('nsenter', '-m', '-u', '-i', '-n', '-p', '-t', dst_pid,
+        'ip', '-br', 'addr', 'show')
+    ).decode().splitlines()
+    for dev_state_addrs in dst_addr_lst:
+        dev_state_addrs = dev_state_addrs.split()
+        if dev_state_addrs[0] == 'lo':
+            continue
+        dst_addr = dev_state_addrs[2]
+        dst_prefix = dst_addr[:dst_addr.rfind('.')] + '.0/24'
+        subprocess.run(
+            ('nsenter', '-n', '-t', src_pid,
+            'ip', 'route', 'add', dst_prefix, 'dev', nxt),
+            stdout=sys.stdout, stderr=subprocess.STDOUT
+        )
+
+def sn_check_route(dir, node):
+    pid_map = _pid_map(f"{dir}/{PID_FILENAME}")
+    subprocess.run(
+        ('nsenter', '-n', '-t', pid_map[node],
+        'route'),
+        stdout=sys.stdout, stderr=subprocess.STDOUT
     )
 
 def sn_clean(dir):
@@ -412,28 +520,18 @@ def sn_clean(dir):
     for ns_link in glob.glob(f"/run/netns/G*"):
         if os.path.islink(ns_link):
             os.remove(ns_link)
-    for pid_file in glob.glob(f"{dir}/[0-9]*/{PID_FILENAME}"):
-        pid_mat = _pid_matrix(pid_file, True)
-        for sid, pid_lst in enumerate(pid_mat):
-            for oid, pid in enumerate(pid_lst):
-                if pid == NOT_ASSIGNED:
-                    continue
-                try:
-                    os.kill(int(pid), 9)
-                except ProcessLookupError:
-                    pass
-        os.remove(pid_file)
-    for pid_file in glob.glob(f"{dir}/GS-*/{PID_FILENAME}"):
-        pid_mat = _pid_matrix(pid_file, True)
-        for pid_lst in pid_mat:
-            for gid, pid in enumerate(pid_lst):
-                if pid == NOT_ASSIGNED:
-                    continue
-                try:
-                    os.kill(int(pid), 9)
-                except ProcessLookupError:
-                    pass
-        os.remove(pid_file)
+    pid_file = f"{dir}/{PID_FILENAME}"
+    if not os.path.exists(pid_file):
+        return
+    pid_map = _pid_map(pid_file, True)
+    for pid in pid_map.values():
+        if pid == NOT_ASSIGNED:
+            continue
+        try:
+            os.kill(int(pid), 9)
+        except ProcessLookupError:
+            pass
+    os.remove(pid_file)
 
 def _change_sat_link_loss(pid, loss):
     out = sn_container_check_output(pid, ('ip', '-br', 'link', 'show')).decode()
@@ -444,40 +542,53 @@ def _change_sat_link_loss(pid, loss):
         dev_name = line.split('@')[0]
         sn_container_check_call(
             pid, 
-            ('tc', 'qdisc', 'change', 'dev', dev_name, 'root', 'netem', 'loss', loss)
+            ('tc', 'qdisc', 'change', 'dev', dev_name, 'root',
+            'netem', 'loss', loss+'%')
         )
 
-def sn_damage(random_list, sat_mid_lst):
-    for shell_id, oid, sid in random_list:
-        pid_file = f"{dir}/{sat_mid_lst[shell_id][1]}/{PID_FILENAME}"
-        if not os.path.exists(pid_file):
-            continue
-        pid_mat = _pid_matrix(pid_file)
-        pid = pid_mat[sid][oid]
-        _change_sat_link_loss(pid, '100%')
-        print(f'[{machine_id}] damage sat: {shell_id},{oid},{sid}')
+def sn_damage(dir, random_list):
+    with open(f"{dir}/{DAMAGE_FILENAME}", 'a') as f:
+        for node in random_list:
+            pid_mat = _pid_map(f"{dir}/{PID_FILENAME}")
+            pid = pid_mat[node]
+            _change_sat_link_loss(pid, '100')
+            f.write(node + '\n')
+            print(f'[{machine_id}] damage node: {node}')
 
-def sn_recover(damage_list, sat_mid_lst, sat_loss):
-    for shell_id, oid, sid in damage_list:
-        pid_file = f"{dir}/{sat_mid_lst[shell_id][1]}/{PID_FILENAME}"
-        if not os.path.exists(pid_file):
-            continue
-        pid_mat = _pid_matrix(pid_file)
-        pid = pid_mat[sid][oid]
-        _change_sat_link_loss(pid, sat_loss)
-        print(f'[{machine_id}] recover sat: {shell_id},{oid},{sid}')
+def sn_recover(dir, sat_loss):
+    damage_file = f"{dir}/{DAMAGE_FILENAME}"
+    if not os.path.exists(damage_file):
+        return
+    with open(f"{dir}/{DAMAGE_FILENAME}", 'r') as f:
+        for node in f:
+            pid_mat = _pid_map(f"{dir}/{PID_FILENAME}")
+            pid = pid_mat[node.strip()]
+            _change_sat_link_loss(pid, sat_loss)
+            print(f'[{machine_id}] recover sat: {node}')
+    os.remove(damage_file)
 
 if __name__ == '__main__':
     # C module
-    import pyctr
+    try:
+        import pyctr
+    except ModuleNotFoundError:
+        subprocess.check_call(
+            "gcc $(python3-config --cflags --ldflags)"
+            "-shared -fPIC -O2 pyctr.c -o pyctr.so'",
+            shell=True
+        )
+        import pyctr
     machine_id = int(sys.argv[1])
-    _mat_cache = {}
+    _pid_map_cache = None
     cmd = sys.argv[2]
     workdir = sys.argv[3]
     gs_mid, sat_mid_lst, ip_lst = _get_params(workdir + '/' + ASSIGN_FILENAME)
     if cmd == 'nodes':
         sn_clean(workdir)
         sn_init_nodes(workdir, gs_mid, sat_mid_lst)
+    elif cmd == 'list':
+        for name in _pid_map(workdir + '/' + PID_FILENAME):
+            print(name)
     elif cmd == 'networks':
         # lp = LineProfiler()
         # sn_update_network = lp(sn_update_network)
@@ -489,16 +600,22 @@ if __name__ == '__main__':
         # with open('report.txt', 'w') as f:
             # lp.print_stats(f)
     elif cmd == 'routed':
-        sn_init_route_daemons(workdir, sat_mid_lst, gs_mid, workdir + '/bird.conf')
+        sn_init_route_daemons(workdir, workdir + '/bird.conf', sys.argv[4])
+    elif cmd == 'IP':
+        get_IP(workdir, sys.argv[4])
+    elif cmd == 'damage':
+        sn_damage(workdir, sys.argv[4].split(','))
+    elif cmd == 'recovery':
+        sn_recover(workdir, sys.argv[4])
     elif cmd == 'clean':
         sn_clean(workdir)
     elif cmd == 'ping':
-        sn_ping(
-            workdir, sat_mid_lst,
-            int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6]),
-            int(sys.argv[7]), int(sys.argv[8]), int(sys.argv[9]),
-        )
-    elif cmd == 'perf':
-        pass
+        sn_ping(workdir, sys.argv[4], sys.argv[5])
+    elif cmd == 'iperf':
+        sn_iperf(workdir, sys.argv[4], sys.argv[5])
+    elif cmd == 'sr':
+        sn_sr(workdir, sys.argv[4], sys.argv[5], sys.argv[6])
+    elif cmd == 'rtable':
+        sn_check_route(workdir, sys.argv[4])
     else:
         print('Unknown command')
