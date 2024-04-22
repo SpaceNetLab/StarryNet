@@ -123,88 +123,92 @@ def calculate_delay(
     cached = True
     for shell in shell_lst:
         pos_dir = os.path.join(dir, shell['name'], 'position')
-        isl_dir = os.path.join(dir, shell['name'], 'isl')
         os.makedirs(pos_dir, exist_ok=True)
-        os.makedirs(isl_dir, exist_ok=True)
-        pos_files = glob.glob(os.path.join(pos_dir, '*.txt'))
-        isl_files = glob.glob(os.path.join(isl_dir, '*.txt'))
-        if len(pos_files) != ts_total or len(isl_files) != 2 * ts_total:
+        if len(glob.glob(os.path.join(pos_dir, '*.txt'))) != ts_total:
             cached = False
+        os.makedirs(os.path.join(dir, shell['name'], 'isl'), exist_ok=True)
+        for file in glob.glob(os.path.join(dir, shell['name'], 'isl', '*.txt')):
+            os.remove(file)
     gsl_dir = os.path.join(dir, 'GS-' + str(len(GS_lat_long)), 'gsl')
-    os.makedirs(gsl_dir, exist_ok=True)
-    gsl_files = glob.glob(os.path.join(gsl_dir, '*.txt'))
-    if len(gsl_files) != 2 * ts_total:
-        cached = False
-    if cached and input(f"Use cached local files [y/n]?").strip().lower()[:1] == 'y':
-        return
-    
-    for shell in shell_lst:
-        pos_files = glob.glob(os.path.join(dir, shell['name'], 'position', '*.txt'))
-        isl_files = glob.glob(os.path.join(dir, shell['name'], 'isl', '*.txt'))
-        for file in pos_files:
-            os.remove(file)
-        for file in isl_files:
-            os.remove(file)
-    for file in gsl_files:
+    os.makedirs(gsl_dir, exist_ok=True)    
+    for file in glob.glob(os.path.join(gsl_dir, '*.txt')):
         os.remove(file)
 
-    ts = load.timescale()
-    since = datetime.datetime(1949, 12, 31, 0, 0, 0)
-    start = datetime.datetime(2020, 1, 1, 0, 0, 0)
-    epoch = (start - since).days
-    GM = 3.9860044e14
-    R = 6371393
-    F = 18
     sat_cbf_t_shell = []
-    ts_lst = [i * step for i in range(ts_total)]
-    for i, shell in enumerate(shell_lst):        
-        inclination = shell['inclination'] * 2 * np.pi / 360
-        altitude = shell['altitude'] * 1000
-        mean_motion = np.sqrt(GM / (R + altitude)**3) * 60
-        orbit_number, sat_number = shell['orbit'], shell['sat']
-        num_of_sat = orbit_number * sat_number
+    if cached and input(f"Use cached local files [y/n]?").strip().lower()[:1] == 'y':
+        for shell in shell_lst:
+            orbit_number, sat_number = shell['orbit'], shell['sat']
+            sat_lla_t = np.zeros((ts_total, orbit_number, sat_number, 3))
+            pos_dir = os.path.join(dir, shell['name'], 'position')
+            for t in range(ts_total):
+                f = open(os.path.join(pos_dir, '%d.txt' % (t + 1)), 'r')
+                for oid in range(orbit_number):
+                    for sid in range(sat_number):
+                        sat_lla_t[t,oid,sid]=list(map(float, f.readline().split(',')))
+                    f.readline()
+                f.close()
+            sat_cbf_t_shell.append(to_cbf(sat_lla_t))
+    else:
+        for shell in shell_lst:
+            for file in glob.glob(os.path.join(dir, shell['name'], 'position', '*.txt')):
+                os.remove(file)
 
-        sat_lla_t = np.zeros((ts_total, orbit_number, sat_number, 3))
-        for oid in range(orbit_number):
-            raan = oid / orbit_number * 2 * np.pi
-            for sid in range(sat_number):
-                mean_anomaly = (sid * 360 / sat_number + oid * 360 * F /
-                                num_of_sat) % 360 * 2 * np.pi / 360
-                satrec = Satrec()
-                satrec.sgp4init(
-                    WGS84,  # gravity model
-                    'i',  # 'a' = old AFSPC mode, 'i' = improved mode
-                    oid * sat_number + sid,  # satnum: Satellite number
-                    epoch,  # epoch: days since 1949 December 31 00:00 UT
-                    2.8098e-05,  # bstar: drag coefficient (/earth radii)
-                    6.969196665e-13,  # ndot: ballistic coefficient (revs/day)
-                    0.0,  # nddot: second derivative of mean motion (revs/day^3)
-                    0.001,  # ecco: eccentricity
-                    0.0,  # argpo: argument of perigee (radians)
-                    inclination,  # inclo: inclination (radians)
-                    mean_anomaly,  # mo: mean anomaly (radians)
-                    mean_motion,  # no_kozai: mean motion (radians/minute)
-                    raan,  # nodeo: right ascension of ascending node (radians)
-                )
-                sat = EarthSatellite.from_satrec(satrec, ts)
-                cur = datetime.datetime(2022, 1, 1, 1, 0, 0)
-                t_ts = ts.utc(*cur.timetuple()[:5], ts_lst)  # [:4]:minute，[:5]:second
-                geocentric = sat.at(t_ts)
-                subpoint = wgs84.subpoint(geocentric)
-                # list: [subpoint.latitude.degrees] [subpoint.longitude.degrees] [subpoint.elevation.km]
-                for t in range(ts_total):
-                    sat_lla_t[t, oid, sid] = (subpoint.latitude.degrees[t],
-                                            subpoint.longitude.degrees[t],
-                                            subpoint.elevation.km[t])
-        pos_dir = os.path.join(dir, shell['name'], 'position')
-        for t, sat_lla in enumerate(sat_lla_t):
-            f = open(os.path.join(pos_dir, '%d.txt' % t), 'w')
-            for sat_lst in sat_lla:
-                for sat in sat_lst:
-                    f.write('%f,%f,%f\n' % (sat[0], sat[1], sat[2]))
-                f.write('\n')
-            f.close()
-        sat_cbf_t_shell.append(to_cbf(sat_lla_t))
+        ts = load.timescale()
+        since = datetime.datetime(1949, 12, 31, 0, 0, 0)
+        start = datetime.datetime(2020, 1, 1, 0, 0, 0)
+        epoch = (start - since).days
+        GM = 3.9860044e14
+        R = 6371393
+        F = 18
+        ts_lst = [i * step for i in range(ts_total)]
+        for i, shell in enumerate(shell_lst):        
+            inclination = shell['inclination'] * 2 * np.pi / 360
+            altitude = shell['altitude'] * 1000
+            mean_motion = np.sqrt(GM / (R + altitude)**3) * 60
+            orbit_number, sat_number = shell['orbit'], shell['sat']
+            num_of_sat = orbit_number * sat_number
+
+            sat_lla_t = np.zeros((ts_total, orbit_number, sat_number, 3))
+            for oid in range(orbit_number):
+                raan = oid / orbit_number * 2 * np.pi
+                for sid in range(sat_number):
+                    mean_anomaly = (sid * 360 / sat_number + oid * 360 * F /
+                                    num_of_sat) % 360 * 2 * np.pi / 360
+                    satrec = Satrec()
+                    satrec.sgp4init(
+                        WGS84,  # gravity model
+                        'i',  # 'a' = old AFSPC mode, 'i' = improved mode
+                        oid * sat_number + sid,  # satnum: Satellite number
+                        epoch,  # epoch: days since 1949 December 31 00:00 UT
+                        2.8098e-05,  # bstar: drag coefficient (/earth radii)
+                        6.969196665e-13,  # ndot: ballistic coefficient (revs/day)
+                        0.0,  # nddot: second derivative of mean motion (revs/day^3)
+                        0.001,  # ecco: eccentricity
+                        0.0,  # argpo: argument of perigee (radians)
+                        inclination,  # inclo: inclination (radians)
+                        mean_anomaly,  # mo: mean anomaly (radians)
+                        mean_motion,  # no_kozai: mean motion (radians/minute)
+                        raan,  # nodeo: right ascension of ascending node (radians)
+                    )
+                    sat = EarthSatellite.from_satrec(satrec, ts)
+                    cur = datetime.datetime(2022, 1, 1, 1, 0, 0)
+                    t_ts = ts.utc(*cur.timetuple()[:5], ts_lst)  # [:4]:minute，[:5]:second
+                    geocentric = sat.at(t_ts)
+                    subpoint = wgs84.subpoint(geocentric)
+                    # list: [subpoint.latitude.degrees] [subpoint.longitude.degrees] [subpoint.elevation.km]
+                    for t in range(ts_total):
+                        sat_lla_t[t, oid, sid] = (subpoint.latitude.degrees[t],
+                                                subpoint.longitude.degrees[t],
+                                                subpoint.elevation.km[t])
+            pos_dir = os.path.join(dir, shell['name'], 'position')
+            for t, sat_lla in enumerate(sat_lla_t):
+                f = open(os.path.join(pos_dir, '%d.txt' % (t + 1)), 'w')
+                for sat_lst in sat_lla:
+                    for sat in sat_lst:
+                        f.write('%f,%f,%f\n' % (sat[0], sat[1], sat[2]))
+                    f.write('\n')
+                f.close()
+            sat_cbf_t_shell.append(to_cbf(sat_lla_t))
 
     isls_t_shell = isl_styles[isl_style](sat_cbf_t_shell)
     for i, isls_t in enumerate(isls_t_shell):

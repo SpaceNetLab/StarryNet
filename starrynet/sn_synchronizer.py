@@ -106,14 +106,18 @@ class RemoteMachine:
     def init_nodes(self):
         sn_remote_wait_output(
             self.ssh,
-            f"python3 {self.dir}/sn_orchestrater.py {self.id} nodes {self.dir}"
+            f"python3 {self.dir}/sn_orchestrater.py nodes {self.id} {self.dir}"
         )
     
     def get_nodes(self):
-        return sn_remote_cmd(
+        lines = sn_remote_cmd(
             self.ssh,
-            f"python3 {self.dir}/sn_orchestrater.py {self.id} list {self.dir}"
-        ).splitlines()
+            f"python3 {self.dir}/sn_orchestrater.py list {self.id} {self.dir}"
+        ).splitlines()[1:]
+        nodes = [
+            line.split()[0] for line in lines
+        ]
+        return nodes
     
     def init_network(self, isl_bw, isl_loss, gsl_bw, gsl_loss):
         for shell in self.shell_lst:
@@ -144,21 +148,21 @@ class RemoteMachine:
     def update_network(self, t, isl_bw, isl_loss, gsl_bw, gsl_loss):
         sn_remote_wait_output(
             self.ssh,
-            f"python3 {self.dir}/sn_orchestrater.py {self.id} networks {self.dir} "
+            f"python3 {self.dir}/sn_orchestrater.py networks {self.id} {self.dir} "
             f"{t} {isl_bw} {isl_loss} {gsl_bw} {gsl_loss}"
         )
     
     def init_routed(self, nodes):
         print(sn_remote_cmd(
             self.ssh,
-            f"python3 {self.dir}/sn_orchestrater.py {self.id} routed {self.dir} "
+            f"python3 {self.dir}/sn_orchestrater.py routed {self.id} {self.dir} "
             +','.join(nodes)
         ))
     
     def get_IP(self, node):
         lines = sn_remote_cmd(
             self.ssh,
-            f"python3 {self.dir}/sn_orchestrater.py {self.id} IP {self.dir} {node}"
+            f"python3 {self.dir}/sn_orchestrater.py IP {self.id} {self.dir} {node}"
         ).splitlines()
         IP_dict = {}
         for line in lines:
@@ -170,7 +174,7 @@ class RemoteMachine:
         def _ping_inner(ssh, dir, res_path, src, dst):
             output = sn_remote_cmd(
                 ssh,
-                f"python3 {dir}/sn_orchestrater.py {self.id} ping {dir} "
+                f"python3 {dir}/sn_orchestrater.py ping {self.id} {dir} "
                 f"{src} {dst} 2>&1"
             )
             with open(res_path, 'w') as f:
@@ -186,7 +190,7 @@ class RemoteMachine:
         def _iperf_inner(ssh, dir, res_path, src, dst):
             output = sn_remote_cmd(
                 ssh,
-                f"python3 {self.dir}/sn_orchestrater.py {self.id} iperf {self.dir} "
+                f"python3 {self.dir}/sn_orchestrater.py iperf {self.id} {self.dir} "
                 f"{src} {dst} 2>&1"
             )
             with open(res_path, 'w') as f:
@@ -202,14 +206,14 @@ class RemoteMachine:
     def sr(self, src, dst, next_hop):
         sn_remote_cmd(
             self.ssh,
-            f"python3 {self.dir}/sn_orchestrater.py {self.id} sr {self.dir} "
+            f"python3 {self.dir}/sn_orchestrater.py sr {self.id} {self.dir} "
             f"{src} {dst} {next_hop} 2>&1"
         )
 
     def check_route(self, res_path, sat):
         output = sn_remote_cmd(
             self.ssh,
-            f"python3 {self.dir}/sn_orchestrater.py {self.id} rtable {self.dir} "
+            f"python3 {self.dir}/sn_orchestrater.py rtable {self.id} {self.dir} "
             f"{sat} 2>&1"
         )
         with open(res_path, 'w') as f:
@@ -221,23 +225,23 @@ class RemoteMachine:
             f.write(output)
         
     def damage(self, random_lst):
-        sn_remote_cmd(
+        print(sn_remote_cmd(
             self.ssh,
-            f"python3 {self.dir}/sn_orchestrater.py {self.id} damage {self.dir} "
+            f"python3 {self.dir}/sn_orchestrater.py damage {self.id} {self.dir} "
             + ','.join(random_lst)
-        )
+        ))
         
     def recovery(self, sat_loss):
         sn_remote_cmd(
             self.ssh,
-            f"python3 {self.dir}/sn_orchestrater.py {self.id} recovery {self.dir} "
+            f"python3 {self.dir}/sn_orchestrater.py recovery {self.id} {self.dir} "
             f"{sat_loss}"
         )
 
     def clean(self):
         sn_remote_cmd(
             self.ssh,
-            f"python3 {self.dir}/sn_orchestrater.py {self.id} clean {self.dir}"
+            f"python3 {self.dir}/sn_orchestrater.py clean {self.id} {self.dir}"
         )
 
 class StarryNet():
@@ -399,7 +403,7 @@ class StarryNet():
             thread.join()
         print("Link initialization:", time.time() - begin, 's consumed.')
 
-    def run_routing_deamon(self, node_lst='all'):
+    def run_routing_daemon(self, node_lst='all'):
         print('Initializing routing ...')
         if node_lst == 'all':
             for remote in self.remote_lst:
