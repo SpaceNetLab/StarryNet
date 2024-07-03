@@ -19,10 +19,10 @@ if __name__ == "__main__":
     hello_interval = 5  # hello_interval(s) in OSPF. 1-200 are supported.
 
     print('Start StarryNet.')
-    sn = StarryNet(configuration_file_path, GS_lat_long)
+    sn = StarryNet(configuration_file_path, GS_lat_long, hello_interval)
     
     node1 = 'SH1O25S14'
-    node1 = 'SH1O25S15'
+    node2 = 'SH1O25S15'
     time_index = 2
     # LLA of a node at a certain time
     LLA = sn.get_position(node1, time_index)
