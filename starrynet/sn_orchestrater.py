@@ -84,7 +84,7 @@ def sn_ISL_establish(current_sat_id, current_orbit_id, container_id_list,
                   " tc qdisc add dev B" +
                   str(current_orbit_id * sat_num + current_sat_id + 1) +
                   "-eth" + str(down_orbit_id * sat_num + down_sat_id + 1) +
-                  " root netem delay " + str(delay) + "ms loss " + str(loss) + "% rate " + str(bw) + "Gbps")
+                  " root netem delay " + str(delay) + "ms loss " + str(loss) + "% rate " + str(bw) + "Gbit")
     print('[Add current node:]' + 'docker network connect ' + ISL_name + " " +
           str(container_id_list[current_orbit_id * sat_num + current_sat_id]) +
           " --ip 10." + str(address_16_23) + "." + str(address_8_15) + ".40")
@@ -120,7 +120,7 @@ def sn_ISL_establish(current_sat_id, current_orbit_id, container_id_list,
                                         down_sat_id]) + " tc qdisc add dev B" +
                   str(down_orbit_id * sat_num + down_sat_id + 1) + "-eth" +
                   str(current_orbit_id * sat_num + current_sat_id + 1) +
-                  " root netem delay " + str(delay) + "ms loss " + str(loss) + "% rate " + str(bw) + "Gbps")
+                  " root netem delay " + str(delay) + "ms loss " + str(loss) + "% rate " + str(bw) + "Gbit")
     print('[Add down node:]' + 'docker network connect ' + ISL_name + " " +
           str(container_id_list[down_orbit_id * sat_num + down_sat_id]) +
           " --ip 10." + str(address_16_23) + "." + str(address_8_15) + ".10")
@@ -188,7 +188,7 @@ def sn_ISL_establish(current_sat_id, current_orbit_id, container_id_list,
                   " tc qdisc add dev B" +
                   str(current_orbit_id * sat_num + current_sat_id + 1) +
                   "-eth" + str(right_orbit_id * sat_num + right_sat_id + 1) +
-                  " root netem delay " + str(delay) + "ms loss " + str(loss) + "% rate " + str(bw) + "Gbps")
+                  " root netem delay " + str(delay) + "ms loss " + str(loss) + "% rate " + str(bw) + "Gbit")
     print('[Add current node:]' + 'docker network connect ' + ISL_name + " " +
           str(container_id_list[current_orbit_id * sat_num + current_sat_id]) +
           " --ip 10." + str(address_16_23) + "." + str(address_8_15) + ".30")
@@ -226,7 +226,7 @@ def sn_ISL_establish(current_sat_id, current_orbit_id, container_id_list,
                   " tc qdisc add dev B" +
                   str(right_orbit_id * sat_num + right_sat_id + 1) + "-eth" +
                   str(current_orbit_id * sat_num + current_sat_id + 1) +
-                  " root netem delay " + str(delay) + "ms loss " + str(loss) + "% rate " + str(bw) + "Gbps")
+                  " root netem delay " + str(delay) + "ms loss " + str(loss) + "% rate " + str(bw) + "Gbit")
     print('[Add right node:]' + 'docker network connect ' + ISL_name + " " +
           str(container_id_list[right_orbit_id * sat_num + right_sat_id]) +
           " --ip 10." + str(address_16_23) + "." + str(address_8_15) + ".20")
@@ -318,7 +318,7 @@ def sn_establish_GSL(container_id_list, matrix, GS_num, constellation_size, bw,
                           str(j) + " up")
                 os.system("docker exec -d " + str(container_id_list[i - 1]) +
                           " tc qdisc add dev B" + str(i - 1 + 1) + "-eth" +
-                          str(j) + " root netem delay " + str(delay) + "ms loss " + str(loss) + "% rate " + str(bw) + "Gbps")
+                          str(j) + " root netem delay " + str(delay) + "ms loss " + str(loss) + "% rate " + str(bw) + "Gbit")
             print('[Add current node:]' + 'docker network connect ' +
                   GSL_name + " " + str(container_id_list[i - 1]) + " --ip 9." +
                   str(address_16_23) + "." + str(address_8_15) + ".50")
@@ -346,7 +346,7 @@ def sn_establish_GSL(container_id_list, matrix, GS_num, constellation_size, bw,
                           " tc qdisc add dev B" + str(j) + "-eth" +
                           str(i - 1 + 1) + " root netem delay " + str(delay) +
                           "ms loss " + str(loss) + "% rate " + str(bw) +
-                          "Gbps")
+                          "Gbit")
             print('[Add right node:]' + 'docker network connect ' + GSL_name +
                   " " + str(container_id_list[j - 1]) + " --ip 9." +
                   str(address_16_23) + "." + str(address_8_15) + ".60")
