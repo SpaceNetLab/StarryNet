@@ -3,6 +3,8 @@ import threading
 import sys
 from time import sleep
 import numpy
+import subprocess
+
 """
 Used in the remote machine for link updating, initializing links, damaging and recovering links and other functionalities。
 author: Yangtao Deng (dengyt21@mails.tsinghua.edu.cn) and Zeqi Lai (zeqilai@tsinghua.edu.cn) 
@@ -385,8 +387,12 @@ def sn_copy_run_conf(container_idx, Path, current, total):
               str(container_idx) + ":/B" + str(current + 1) + ".conf")
     print("[" + str(current + 1) + "/" + str(total) + "]" +
           " docker cp bird.conf " + str(container_idx) + ":/bird.conf")
-    os.system("docker exec -it " + str(container_idx) + " bird -c B" +
-              str(current + 1) + ".conf")
+    #os.system("docker exec -it " + str(container_idx) + " bird -c B" +
+    #          str(current + 1) + ".conf")
+    result = subprocess.run(["docker", "exec", str(container_idx), "bird", "-c", "B"+str(current+1)+".conf"],
+                            capture_output=True, text=True)
+    with open("/tmp/bird.log", "a") as f:
+        f.write(str(container_idx)+": "+result.stdout+"\n")
     print("[" + str(current + 1) + "/" + str(total) +
           "] Bird routing process for container: " + str(container_idx) +
           " has started. ")
