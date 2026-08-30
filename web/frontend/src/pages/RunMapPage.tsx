@@ -285,10 +285,6 @@ export function RunMapPage() {
                 <p className="metric-label">Links</p>
                 <p className="metric-value">{mapState.data.summary.links}</p>
               </div>
-              <div className="metric-card">
-                <p className="metric-label">Overlays</p>
-                <p className="metric-value">{mapState.data.summary.overlays}</p>
-              </div>
             </section>
 
             <div className="map-workbench">
@@ -471,18 +467,6 @@ export function RunMapPage() {
                       <div>
                         <dt>Neighbors</dt>
                         <dd>{selectedEntity.neighbor_count}</dd>
-                      </div>
-                      <div>
-                        <dt>Ground stations</dt>
-                        <dd>{selectedEntity.connected_ground_stations.join(", ") || "-"}</dd>
-                      </div>
-                      <div>
-                        <dt>IPv4</dt>
-                        <dd>{selectedEntity.ipv4 ?? "-"}</dd>
-                      </div>
-                      <div>
-                        <dt>IPv6</dt>
-                        <dd>{selectedEntity.ipv6 ?? "-"}</dd>
                       </div>
                     </dl>
 
