@@ -59,6 +59,9 @@ class Node:
             os.unlink(netns_link)
         subprocess.check_call(('ln', '-s', f'/proc/{self.pid}/ns/net', netns_link))
         _switch_netns(self.pid)
+        _sysctl('net.ipv4.conf.all.forwarding', '1')
+        _sysctl('net.ipv6.conf.all.forwarding', '1', check=False)
+
         self.socket_fd = pynetlink.init_socket(self.pid)
 
         self.idle_links: List[NetInterface] = list()
@@ -273,10 +276,11 @@ class OrchestratorContext:
         if src_node is None or dst_node is None:
             return None
 
+        src_addr = src_node.peer2link['lo'].ipv4.ip.compressed
         dst_addr = dst_node.peer2link['lo'].ipv4.ip.compressed
         return (
-            (dst_node, ('iperf3', '-s', '-1', *dst_args)),
-            (src_node, ('iperf3', '-c', dst_addr, *src_args)),
+            (dst_node, ('iperf3', *dst_args, '-s', '-1', '-B', dst_addr)),
+            (src_node, ('iperf3', *src_args, '-c', dst_addr, '-B', src_addr)),
         )
 
     def get_exec_command(self, node_name: str, cmd: str):
